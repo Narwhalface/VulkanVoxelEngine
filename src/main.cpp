@@ -9,10 +9,6 @@ void InitializeVulkan() {
     
     uint32_t layerCount = 0;
     VkPhysicalDevice gpu;
-    std::vector<VkPhysicalDevice> gpuList(1);
-    uint32_t gpuCount = 0;
-    const char* enabledLayers[] = { "VK_LAYER_KHRONOS_validation" };
-    uint32_t enabledLayerCount = 1;
     uint32_t queueCount = 0;
     uint32_t graphicsFamily = UINT32_MAX;
     VkPhysicalDeviceMemoryProperties memoryProperties{};
@@ -40,15 +36,20 @@ void InitializeVulkan() {
         }
     }
 
-    const char* enabledExtensions[] = {
+    //Create Vulkan instance
+    std::vector<const char*> enabledLayers = {
+        "VK_LAYER_KHRONOS_validation",
+        "VK_LAYER_LUNARG_object_tracker"
+    };
+
+    std::vector<const char*> enabledExtensions = {
         VK_KHR_SURFACE_EXTENSION_NAME,
         VK_KHR_WIN32_SURFACE_EXTENSION_NAME
     };
-    uint32_t enabledExtensionCount = 2;
 
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "VulkanVoxelEngine";
+    appInfo.pApplicationName = "VoxelEngine 32002614";
     appInfo.applicationVersion = VK_MAKE_VERSION(0, 1, 0);
     appInfo.pEngineName = "Custom";
     appInfo.engineVersion = VK_MAKE_VERSION(0, 1, 0);
@@ -58,44 +59,50 @@ void InitializeVulkan() {
     VkInstanceCreateInfo ci{};
     ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     ci.pApplicationInfo = &appInfo;
-    ci.enabledLayerCount = enabledLayerCount;
-    ci.ppEnabledLayerNames = enabledLayers;
-    ci.enabledExtensionCount = enabledExtensionCount;
-    ci.ppEnabledExtensionNames = enabledExtensions;
+    ci.enabledLayerCount = static_cast<uint32_t>(enabledLayers.size());
+    ci.ppEnabledLayerNames = enabledLayers.data();
+    ci.enabledExtensionCount = static_cast<uint32_t>(enabledExtensions.size());
+    ci.ppEnabledExtensionNames = enabledExtensions.data();
 
     VkInstance instance = VK_NULL_HANDLE;
     VkResult res = vkCreateInstance(&ci, nullptr, &instance);
     if (res != VK_SUCCESS) {
-        std::cout << "vkCreateInstance failed: " << res << std::endl;
+        std::cout << "Failed to create Vulkan instance: " << res << std::endl;
         return;
     } else {
         std::cout << "Vulkan instance created successfully" << std::endl;
     }
 
-    //Enumerate physical devices
-    vkEnumeratePhysicalDeviceGroups(instance, &gpuCount, NULL);
-    vkEnumeratePhysicalDevices(instance, &gpuCount, gpuList.data());
-
-    //Create a device and Queue
-    vkGetPhysicalDeviceQueueFamilyProperties(gpu, &queueCount, NULL);
-    std::vector<VkQueueFamilyProperties> queueProps(queueCount);
-    vkGetPhysicalDeviceQueueFamilyProperties(gpu, &queueCount, queueProps.data());
-    for (uint32_t i = 0;  i < queueCount; ++i) {
-        if (queueProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            graphicsFamily = i;
-            break;
-        }
-    }
-    if (graphicsFamily == UINT32_MAX) {
-        std::cout << "No graphics queue family found" << std::endl;
+    uint32_t gpuCount = 0;
+    VkResult physRes = vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr);
+    if (physRes != VK_SUCCESS || gpuCount == 0) {
+        std::cout << "Failed to find GPUs with Vulkan support: " << physRes << std::endl;
         return;
     } else {
-        std::cout << "Graphics queue family index: " << graphicsFamily << std::endl;
+        std::cout << "Number of Vulkan-capable GPUs: " << gpuCount << std::endl;
     }
 
-    //Gets the device information
-    vkGetPhysicalDeviceMemoryProperties(gpu, &memoryProperties);
-    vkGetPhysicalDeviceProperties(gpu, &gpuProps);
+    std::vector<VkPhysicalDevice> gpuList(gpuCount);
+    physRes = vkEnumeratePhysicalDevices(instance, &gpuCount, gpuList.data());
+    if (physRes != VK_SUCCESS) {
+        std::cout << "Failed to enumerate physical devices: " << physRes << std::endl;
+        return;
+    } else {
+        std::cout << "Physical devices enumerated successfully" << std::endl;
+    }
+
+    VkPhysicalDevice gpu = gpuList[0];
+
+    uint32_t gpuCount = 0;
+    vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr);
+    std::vector<VkPhysicalDevice> gpus(gpuCount);
+    vkEnumeratePhysicalDevices(instance, &gpuCount, gpus.data());
+    VkPhysicalDevice gpu = gpuList[0];
+
+    uint32_t queueCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(gpu, &queueCount, nullptr);
+    std::vector<VkQueueFamilyProperties> queueProps(queueCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(gpu, &queueCount, queueProps.data());
 
     //Queue description
     float QueuePriorities = 1.0f;
