@@ -1,6 +1,6 @@
 #include <vulkan/vulkan.h>
 #include <glfw3.h>
-#include <cstdio>
+#include <iostream>
 #include <vector>
 #include <vulkan/vulkan_win32.h>
 #include <vulkan/vulkan_structs.hpp>
@@ -19,13 +19,24 @@ void InitializeVulkan() {
     VkPhysicalDeviceProperties gpuProps{};
 
     //Enumerate instance layers
-    if (vkEnumerateInstanceLayerProperties(&layerCount, nullptr) != VK_SUCCESS || layerCount == 0) {
-        printf("No instance layers found or enumeration failed\n");
-    } else {
-        std::vector<VkLayerProperties> layers(layerCount);
-        vkEnumerateInstanceLayerProperties(&layerCount, layers.data());
-        for (uint32_t i = 0; i < layerCount; i++) {
-            printf("Layer %u: %s\n", i, layers[i].layerName);
+    vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+    std::vector<VkLayerProperties> layers(layerCount);
+    vkEnumerateInstanceLayerProperties(&layerCount, layers.data());
+
+    //Enumerate extensions for each layer
+    for (const auto& layer : layers) {
+        uint32_t extCount = 0;
+        vkEnumerateInstanceExtensionProperties(layer.layerName, &extCount, nullptr);
+        std::vector<VkExtensionProperties> exts(extCount);
+        VkResult res = vkEnumerateInstanceExtensionProperties(layer.layerName, &extCount, exts.data());
+        if (res != VK_SUCCESS) {
+            std::cout << "Failed to enumerate extensions for layer " << layer.layerName << ": " << res << std::endl;
+            continue;
+        } else {
+            std::cout << "Extensions for layer " << layer.layerName << " :" << std::endl;
+            for (const auto& ext : exts) {
+                std::cout << "\t" << ext.extensionName << std::endl;
+            }
         }
     }
 
@@ -55,10 +66,10 @@ void InitializeVulkan() {
     VkInstance instance = VK_NULL_HANDLE;
     VkResult res = vkCreateInstance(&ci, nullptr, &instance);
     if (res != VK_SUCCESS) {
-        printf("vkCreateInstance failed: %d\n", res);
+        std::cout << "vkCreateInstance failed: " << res << std::endl;
         return;
     } else {
-        printf("Vulkan instance created successfully\n");
+        std::cout << "Vulkan instance created successfully" << std::endl;
     }
 
     //Enumerate physical devices
@@ -76,10 +87,10 @@ void InitializeVulkan() {
         }
     }
     if (graphicsFamily == UINT32_MAX) {
-        printf("No graphics queue family found\n");
+        std::cout << "No graphics queue family found" << std::endl;
         return;
     } else {
-        printf("Graphics queue family index: %u\n", graphicsFamily);
+        std::cout << "Graphics queue family index: " << graphicsFamily << std::endl;
     }
 
     //Gets the device information
@@ -103,9 +114,9 @@ void InitializeVulkan() {
     VkDevice device = VK_NULL_HANDLE;
     VkResult devRes = vkCreateDevice(gpu, &deviceCreateInfo, nullptr, &device);
     if (devRes == VK_SUCCESS) {
-        printf("Vulkan device created successfully\n");
+        std::cout << "Vulkan device created successfully" << std::endl;
     } else {
-        printf("Failed to create Vulkan device: %d\n", devRes);
+        std::cout << "Failed to create Vulkan device: " << devRes << std::endl;
         return;
     }
 
