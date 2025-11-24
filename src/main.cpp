@@ -114,5 +114,6 @@ void InitializeVulkan() {
 
 int main() {
     InitializeVulkan();
+    getchar();
     return 0;
 }
