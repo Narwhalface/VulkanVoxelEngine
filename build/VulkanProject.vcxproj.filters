@@ -4,12 +4,6 @@
     <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\engine\Window.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\engine\VulkanEngine.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="C:\Dev\VulkanVoxelEngine\CMakeLists.txt" />
