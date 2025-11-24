@@ -1,0 +1,102 @@
+Rendering a 3D cube — short pseudocode and checklist
+
+Purpose
+- A short, clear plan for adding a 3D cube to the engine. Not real C++ code.
+
+Assumes
+- You already have code that creates Instance, Surface, Swapchain, RenderPass, Pipeline, Framebuffers, Command Buffers, and sync objects.
+
+Contents (quick)
+1) Inputs & outputs
+2) Vertex/index/uniform shapes
+3) Pipeline changes
+4) Resources to create
+5) Command buffer flow
+6) Shader roles
+7) Per-frame loop
+8) Debug checklist
+9) Roadmap
+
+---
+
+1) Inputs & outputs
+- Inputs: cube vertices, indices, and camera matrices (model, view, proj).
+- Output: a rendered cube in the window.
+- Errors to watch: missing shaders, wrong vertex layout, no depth buffer.
+
+---
+
+2) Data shapes (short)
+- Vertex: position (vec3), color (vec3), optional normal (vec3).
+- Indices: array of u16/u32 (3 per triangle).
+- UBO: model, view, proj (or combined mvp).
+
+Notes: pick u16 vs u32 by vertex count. Keep vertex winding consistent for face culling.
+
+---
+
+3) Pipeline changes (short)
+- Vertex input: one binding with stride = sizeof(Vertex). Attributes: location 0 = pos, 1 = color.
+- Input assembly: triangle list.
+- Enable depth test and depth write (VK_COMPARE_OP_LESS).
+- Add descriptor set layout for a UBO (binding 0).
+- Add a depth attachment to the render pass and include it in framebuffers.
+
+---
+
+4) Resources to create
+- Vertex buffer (device local, use staging upload).
+- Index buffer (device local).
+- Uniform buffers (one per swapchain image or use dynamic offsets).
+- Descriptor pool and sets for UBOs.
+- Depth image + memory + view (recreate on resize).
+
+Helper: implement findMemoryType(typeFilter, properties).
+
+---
+
+5) Command buffer flow (per frame)
+- Begin command buffer.
+- Begin render pass (clear color + depth).
+- Bind pipeline and descriptor sets.
+- Bind vertex and index buffers.
+- Draw indexed.
+- End render pass and command buffer.
+
+Update UBO for the current swapchain image before submitting.
+
+---
+
+6) Shader responsibilities
+- Vertex: read position and color, apply `mvp` (UBO), output color.
+- Fragment: output the color.
+
+---
+
+7) Per-frame loop (short)
+- Compute model/view/proj (or mvp).
+- Update the UBO for the current frame.
+- Submit the recorded command buffer and present.
+
+Note: glm::perspective may need Y inversion for Vulkan.
+
+---
+
+8) Debug checklist
+- Nothing visible: check shaders, vertex layout, and validation layers.
+- Depth issues: enable depth testing and attach a depth buffer.
+- Memory issues: flush non-coherent memory or use correct staging/copy.
+- Resize: recreate swapchain and dependent resources.
+
+---
+
+9) Roadmap (next code tasks)
+- Add Vertex struct and cube data.
+- Implement createBuffer, copyBuffer, and findMemoryType.
+- Create vertex/index buffers and upload data.
+- Create UBOs, descriptor layouts, and write descriptor sets.
+- Add depth attachment in render pass and create depth image.
+- Update pipeline for vertex input and depth/stencil state.
+- Record command buffers to draw indexed geometry.
+
+If you want, I can implement helpers and the minimal rendering code next.

@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Dev/VulkanVoxelEngine/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

@@ -1,0 +1,58 @@
+^C:\DEV\VULKANVOXELENGINE\BUILD\CMAKEFILES\23E4EB3C93AA0BC35D6AC1342C9D7DF5\CUBE.FRAG.SPV.RULE
+setlocal
+C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/cube.frag -o C:/Dev/VulkanVoxelEngine/build/shaders/cube.frag.spv
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\DEV\VULKANVOXELENGINE\BUILD\CMAKEFILES\23E4EB3C93AA0BC35D6AC1342C9D7DF5\CUBE.VERT.SPV.RULE
+setlocal
+C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/cube.vert -o C:/Dev/VulkanVoxelEngine/build/shaders/cube.vert.spv
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\DEV\VULKANVOXELENGINE\BUILD\CMAKEFILES\23E4EB3C93AA0BC35D6AC1342C9D7DF5\TRIANGLE.FRAG.SPV.RULE
+setlocal
+C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/triangle.frag -o C:/Dev/VulkanVoxelEngine/build/shaders/triangle.frag.spv
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\DEV\VULKANVOXELENGINE\BUILD\CMAKEFILES\23E4EB3C93AA0BC35D6AC1342C9D7DF5\TRIANGLE.VERT.SPV.RULE
+setlocal
+C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/triangle.vert -o C:/Dev/VulkanVoxelEngine/build/shaders/triangle.vert.spv
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\DEV\VULKANVOXELENGINE\BUILD\CMAKEFILES\DCFA11267798BA05D3E718DD1B438D30\SHADERS.RULE
+setlocal
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\DEV\VULKANVOXELENGINE\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Dev/VulkanVoxelEngine -BC:/Dev/VulkanVoxelEngine/build --check-stamp-file C:/Dev/VulkanVoxelEngine/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
