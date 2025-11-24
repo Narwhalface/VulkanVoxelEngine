@@ -111,3 +111,8 @@ void InitializeVulkan() {
 
     vkDestroyInstance(instance, nullptr);
 }
+
+int main() {
+    InitializeVulkan();
+    return 0;
+}
