@@ -1,15 +1,14 @@
 #include <vulkan/vulkan.h>
 #include <glfw3.h>
+#include <windows.h>
 #include <iostream>
 #include <vector>
+#include <cstring>
 #include <vulkan/vulkan_win32.h>
-#include <vulkan/vulkan_structs.hpp>
 
 void InitializeVulkan() {
     
     uint32_t layerCount = 0;
-    VkPhysicalDevice gpu;
-    uint32_t queueCount = 0;
     uint32_t graphicsFamily = UINT32_MAX;
     VkPhysicalDeviceMemoryProperties memoryProperties{};
     VkPhysicalDeviceProperties gpuProps{};
@@ -37,10 +36,24 @@ void InitializeVulkan() {
     }
 
     //Create Vulkan instance
-    std::vector<const char*> enabledLayers = {
+    // Only enable layers that are actually present on the system.
+    std::vector<const char*> desiredLayers = {
         "VK_LAYER_KHRONOS_validation",
         "VK_LAYER_LUNARG_object_tracker"
     };
+
+    std::vector<const char*> enabledLayers;
+    for (const char* name : desiredLayers) {
+        bool found = false;
+        for (const auto& l : layers) {
+            if (std::strcmp(l.layerName, name) == 0) { found = true; break; }
+        }
+        if (found) {
+            enabledLayers.push_back(name);
+        } else {
+            std::cout << "Layer not present, skipping: " << name << std::endl;
+        }
+    }
 
     std::vector<const char*> enabledExtensions = {
         VK_KHR_SURFACE_EXTENSION_NAME,
@@ -67,7 +80,15 @@ void InitializeVulkan() {
     VkInstance instance = VK_NULL_HANDLE;
     VkResult res = vkCreateInstance(&ci, nullptr, &instance);
     if (res != VK_SUCCESS) {
-        std::cout << "Failed to create Vulkan instance: " << res << std::endl;
+        std::cout << "Failed to create Vulkan instance: " << res;
+        if (res == VK_ERROR_LAYER_NOT_PRESENT) {
+            std::cout << " (VK_ERROR_LAYER_NOT_PRESENT). One or more requested layers are missing.\n";
+            std::cout << "Available layers were listed earlier — enable only present layers or install the SDK validation layers." << std::endl;
+        } else if (res == VK_ERROR_EXTENSION_NOT_PRESENT) {
+            std::cout << " (VK_ERROR_EXTENSION_NOT_PRESENT). A requested extension is missing." << std::endl;
+        } else {
+            std::cout << std::endl;
+        }
         return;
     } else {
         std::cout << "Vulkan instance created successfully" << std::endl;
@@ -92,25 +113,41 @@ void InitializeVulkan() {
     }
 
     VkPhysicalDevice gpu = gpuList[0];
-
-    uint32_t gpuCount = 0;
-    vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr);
-    std::vector<VkPhysicalDevice> gpus(gpuCount);
-    vkEnumeratePhysicalDevices(instance, &gpuCount, gpus.data());
-    VkPhysicalDevice gpu = gpuList[0];
+    vkGetPhysicalDeviceProperties(gpu, &gpuProps);
+    vkGetPhysicalDeviceMemoryProperties(gpu, &memoryProperties);
+    std::cout << "Using GPU: " << gpuProps.deviceName << std::endl;
 
     uint32_t queueCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(gpu, &queueCount, nullptr);
     std::vector<VkQueueFamilyProperties> queueProps(queueCount);
     vkGetPhysicalDeviceQueueFamilyProperties(gpu, &queueCount, queueProps.data());
 
+    for (uint32_t i = 0; i < queueCount; ++i) {
+        const auto& queueFamily = queueProps[i];
+        if (queueFamily.queueCount == 0) {
+            continue;
+        }
+        if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            graphicsFamily = i;
+            break;
+        }
+    }
+
+    if (graphicsFamily == UINT32_MAX) {
+        std::cout << "Failed to find a queue family with graphics capabilities" << std::endl;
+        vkDestroyInstance(instance, nullptr);
+        return;
+    }
+
+    std::cout << "Graphics queue family index: " << graphicsFamily << std::endl;
+
     //Queue description
-    float QueuePriorities = 1.0f;
+    float queuePriority = 1.0f;
     VkDeviceQueueCreateInfo queueCreateInfo{};
     queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     queueCreateInfo.queueFamilyIndex = graphicsFamily;
     queueCreateInfo.queueCount = 1;
-    queueCreateInfo.pQueuePriorities = &QueuePriorities;
+    queueCreateInfo.pQueuePriorities = &queuePriority;
 
     //Logical device description
     VkDeviceCreateInfo deviceCreateInfo{};
@@ -124,9 +161,11 @@ void InitializeVulkan() {
         std::cout << "Vulkan device created successfully" << std::endl;
     } else {
         std::cout << "Failed to create Vulkan device: " << devRes << std::endl;
+        vkDestroyInstance(instance, nullptr);
         return;
     }
 
+    vkDestroyDevice(device, nullptr);
     vkDestroyInstance(instance, nullptr);
 }
 
