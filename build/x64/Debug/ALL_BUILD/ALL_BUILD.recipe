@@ -5,6 +5,9 @@
       <FullPath>C:\Dev\VulkanVoxelEngine\build\x64\Debug\ZERO_CHECK</FullPath>
     </ProjectOutput>
     <ProjectOutput>
+      <FullPath>C:\Dev\VulkanVoxelEngine\build\x64\Debug\Shaders</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
       <FullPath>C:\Dev\VulkanVoxelEngine\build\bin\Debug\VulkanProject.exe</FullPath>
     </ProjectOutput>
     <ProjectOutput>

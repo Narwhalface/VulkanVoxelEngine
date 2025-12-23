@@ -188,6 +188,9 @@ CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
 //Enable Vulkan validation layers
 ENABLE_VALIDATION:BOOL=OFF
 
+//Path to a program.
+GLSLC_EXECUTABLE:FILEPATH=C:/VulkanSDK/1.4.321.1/Bin/glslc.exe
+
 //Value Computed by CMake
 VulkanProject_BINARY_DIR:STATIC=C:/Dev/VulkanVoxelEngine/build
 

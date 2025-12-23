@@ -1,6 +1,8 @@
-^C:\DEV\VULKANVOXELENGINE\BUILD\CMAKEFILES\23E4EB3C93AA0BC35D6AC1342C9D7DF5\CUBE.FRAG.SPV.RULE
+^C:\DEV\VULKANVOXELENGINE\BUILD\CMAKEFILES\164D6EDD83BDC7ECBB149C90F38297DD\VOXEL.FRAG.SPV.RULE
 setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/cube.frag -o C:/Dev/VulkanVoxelEngine/build/shaders/cube.frag.spv
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/Dev/VulkanVoxelEngine/shaders
+if %errorlevel% neq 0 goto :cmEnd
+C:\VulkanSDK\1.4.321.1\Bin\glslc.exe C:/Dev/VulkanVoxelEngine/src/shaders/voxel.frag -o C:/Dev/VulkanVoxelEngine/shaders/voxel.frag.spv
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
@@ -8,29 +10,11 @@ endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd
-^C:\DEV\VULKANVOXELENGINE\BUILD\CMAKEFILES\23E4EB3C93AA0BC35D6AC1342C9D7DF5\CUBE.VERT.SPV.RULE
+^C:\DEV\VULKANVOXELENGINE\BUILD\CMAKEFILES\164D6EDD83BDC7ECBB149C90F38297DD\VOXEL.VERT.SPV.RULE
 setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/cube.vert -o C:/Dev/VulkanVoxelEngine/build/shaders/cube.vert.spv
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/Dev/VulkanVoxelEngine/shaders
 if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd
-^C:\DEV\VULKANVOXELENGINE\BUILD\CMAKEFILES\23E4EB3C93AA0BC35D6AC1342C9D7DF5\TRIANGLE.FRAG.SPV.RULE
-setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/triangle.frag -o C:/Dev/VulkanVoxelEngine/build/shaders/triangle.frag.spv
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd
-^C:\DEV\VULKANVOXELENGINE\BUILD\CMAKEFILES\23E4EB3C93AA0BC35D6AC1342C9D7DF5\TRIANGLE.VERT.SPV.RULE
-setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/triangle.vert -o C:/Dev/VulkanVoxelEngine/build/shaders/triangle.vert.spv
+C:\VulkanSDK\1.4.321.1\Bin\glslc.exe C:/Dev/VulkanVoxelEngine/src/shaders/voxel.vert -o C:/Dev/VulkanVoxelEngine/shaders/voxel.vert.spv
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone

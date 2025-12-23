@@ -105,10 +105,12 @@
     </Midl>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\23e4eb3c93aa0bc35d6ac1342c9d7df5\cube.frag.spv.rule">
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling cube.frag to SPIR-V</Message>
+    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\164d6edd83bdc7ecbb149c90f38297dd\voxel.frag.spv.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling voxel.frag to SPIR-V</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/cube.frag -o C:/Dev/VulkanVoxelEngine/build/shaders/cube.frag.spv
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/Dev/VulkanVoxelEngine/shaders
+if %errorlevel% neq 0 goto :cmEnd
+C:\VulkanSDK\1.4.321.1\Bin\glslc.exe C:/Dev/VulkanVoxelEngine/src/shaders/voxel.frag -o C:/Dev/VulkanVoxelEngine/shaders/voxel.frag.spv
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -116,12 +118,14 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\shaders\cube.frag;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\cube.frag.spv</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\src\shaders\voxel.frag;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\shaders\voxel.frag.spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling cube.frag to SPIR-V</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling voxel.frag to SPIR-V</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/cube.frag -o C:/Dev/VulkanVoxelEngine/build/shaders/cube.frag.spv
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/Dev/VulkanVoxelEngine/shaders
+if %errorlevel% neq 0 goto :cmEnd
+C:\VulkanSDK\1.4.321.1\Bin\glslc.exe C:/Dev/VulkanVoxelEngine/src/shaders/voxel.frag -o C:/Dev/VulkanVoxelEngine/shaders/voxel.frag.spv
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -129,12 +133,14 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\shaders\cube.frag;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\cube.frag.spv</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\src\shaders\voxel.frag;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\shaders\voxel.frag.spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Compiling cube.frag to SPIR-V</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Compiling voxel.frag to SPIR-V</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/cube.frag -o C:/Dev/VulkanVoxelEngine/build/shaders/cube.frag.spv
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/Dev/VulkanVoxelEngine/shaders
+if %errorlevel% neq 0 goto :cmEnd
+C:\VulkanSDK\1.4.321.1\Bin\glslc.exe C:/Dev/VulkanVoxelEngine/src/shaders/voxel.frag -o C:/Dev/VulkanVoxelEngine/shaders/voxel.frag.spv
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -142,12 +148,14 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\shaders\cube.frag;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\cube.frag.spv</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\src\shaders\voxel.frag;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\shaders\voxel.frag.spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Compiling cube.frag to SPIR-V</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Compiling voxel.frag to SPIR-V</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/cube.frag -o C:/Dev/VulkanVoxelEngine/build/shaders/cube.frag.spv
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/Dev/VulkanVoxelEngine/shaders
+if %errorlevel% neq 0 goto :cmEnd
+C:\VulkanSDK\1.4.321.1\Bin\glslc.exe C:/Dev/VulkanVoxelEngine/src/shaders/voxel.frag -o C:/Dev/VulkanVoxelEngine/shaders/voxel.frag.spv
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -155,16 +163,18 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\shaders\cube.frag;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\cube.frag.spv</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\src\shaders\voxel.frag;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\shaders\voxel.frag.spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\23e4eb3c93aa0bc35d6ac1342c9d7df5\cube.vert.spv.rule">
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling cube.vert to SPIR-V</Message>
+    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\164d6edd83bdc7ecbb149c90f38297dd\voxel.vert.spv.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling voxel.vert to SPIR-V</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/cube.vert -o C:/Dev/VulkanVoxelEngine/build/shaders/cube.vert.spv
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/Dev/VulkanVoxelEngine/shaders
+if %errorlevel% neq 0 goto :cmEnd
+C:\VulkanSDK\1.4.321.1\Bin\glslc.exe C:/Dev/VulkanVoxelEngine/src/shaders/voxel.vert -o C:/Dev/VulkanVoxelEngine/shaders/voxel.vert.spv
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -172,12 +182,14 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\shaders\cube.vert;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\cube.vert.spv</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\src\shaders\voxel.vert;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\shaders\voxel.vert.spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling cube.vert to SPIR-V</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling voxel.vert to SPIR-V</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/cube.vert -o C:/Dev/VulkanVoxelEngine/build/shaders/cube.vert.spv
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/Dev/VulkanVoxelEngine/shaders
+if %errorlevel% neq 0 goto :cmEnd
+C:\VulkanSDK\1.4.321.1\Bin\glslc.exe C:/Dev/VulkanVoxelEngine/src/shaders/voxel.vert -o C:/Dev/VulkanVoxelEngine/shaders/voxel.vert.spv
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -185,12 +197,14 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\shaders\cube.vert;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\cube.vert.spv</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\src\shaders\voxel.vert;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\shaders\voxel.vert.spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Compiling cube.vert to SPIR-V</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Compiling voxel.vert to SPIR-V</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/cube.vert -o C:/Dev/VulkanVoxelEngine/build/shaders/cube.vert.spv
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/Dev/VulkanVoxelEngine/shaders
+if %errorlevel% neq 0 goto :cmEnd
+C:\VulkanSDK\1.4.321.1\Bin\glslc.exe C:/Dev/VulkanVoxelEngine/src/shaders/voxel.vert -o C:/Dev/VulkanVoxelEngine/shaders/voxel.vert.spv
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -198,12 +212,14 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\shaders\cube.vert;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\cube.vert.spv</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\src\shaders\voxel.vert;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\shaders\voxel.vert.spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Compiling cube.vert to SPIR-V</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Compiling voxel.vert to SPIR-V</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/cube.vert -o C:/Dev/VulkanVoxelEngine/build/shaders/cube.vert.spv
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/Dev/VulkanVoxelEngine/shaders
+if %errorlevel% neq 0 goto :cmEnd
+C:\VulkanSDK\1.4.321.1\Bin\glslc.exe C:/Dev/VulkanVoxelEngine/src/shaders/voxel.vert -o C:/Dev/VulkanVoxelEngine/shaders/voxel.vert.spv
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -211,120 +227,8 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\shaders\cube.vert;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\cube.vert.spv</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
-    </CustomBuild>
-  </ItemGroup>
-  <ItemGroup>
-    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\23e4eb3c93aa0bc35d6ac1342c9d7df5\triangle.frag.spv.rule">
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling triangle.frag to SPIR-V</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/triangle.frag -o C:/Dev/VulkanVoxelEngine/build/shaders/triangle.frag.spv
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\shaders\triangle.frag;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\triangle.frag.spv</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling triangle.frag to SPIR-V</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/triangle.frag -o C:/Dev/VulkanVoxelEngine/build/shaders/triangle.frag.spv
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\shaders\triangle.frag;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\triangle.frag.spv</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Compiling triangle.frag to SPIR-V</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/triangle.frag -o C:/Dev/VulkanVoxelEngine/build/shaders/triangle.frag.spv
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\shaders\triangle.frag;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\triangle.frag.spv</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Compiling triangle.frag to SPIR-V</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/triangle.frag -o C:/Dev/VulkanVoxelEngine/build/shaders/triangle.frag.spv
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\shaders\triangle.frag;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\triangle.frag.spv</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
-    </CustomBuild>
-  </ItemGroup>
-  <ItemGroup>
-    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\23e4eb3c93aa0bc35d6ac1342c9d7df5\triangle.vert.spv.rule">
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling triangle.vert to SPIR-V</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/triangle.vert -o C:/Dev/VulkanVoxelEngine/build/shaders/triangle.vert.spv
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\shaders\triangle.vert;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\triangle.vert.spv</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling triangle.vert to SPIR-V</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/triangle.vert -o C:/Dev/VulkanVoxelEngine/build/shaders/triangle.vert.spv
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\shaders\triangle.vert;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\triangle.vert.spv</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Compiling triangle.vert to SPIR-V</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/triangle.vert -o C:/Dev/VulkanVoxelEngine/build/shaders/triangle.vert.spv
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\shaders\triangle.vert;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\triangle.vert.spv</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Compiling triangle.vert to SPIR-V</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
-C:\VulkanSDK\1.4.321.1\Bin\glslangValidator.exe -V C:/Dev/VulkanVoxelEngine/shaders/triangle.vert -o C:/Dev/VulkanVoxelEngine/build/shaders/triangle.vert.spv
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\shaders\triangle.vert;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\triangle.vert.spv</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\src\shaders\voxel.vert;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\shaders\voxel.vert.spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
     </CustomBuild>
   </ItemGroup>
@@ -338,7 +242,7 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\triangle.vert.spv;C:\Dev\VulkanVoxelEngine\build\shaders\triangle.frag.spv;C:\Dev\VulkanVoxelEngine\build\shaders\cube.vert.spv;C:\Dev\VulkanVoxelEngine\build\shaders\cube.frag.spv;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\shaders\voxel.vert.spv;C:\Dev\VulkanVoxelEngine\shaders\voxel.frag.spv;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Dev\VulkanVoxelEngine\build\CMakeFiles\Shaders</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
       <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</VerifyInputsAndOutputsExist>
@@ -350,7 +254,7 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\triangle.vert.spv;C:\Dev\VulkanVoxelEngine\build\shaders\triangle.frag.spv;C:\Dev\VulkanVoxelEngine\build\shaders\cube.vert.spv;C:\Dev\VulkanVoxelEngine\build\shaders\cube.frag.spv;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\shaders\voxel.vert.spv;C:\Dev\VulkanVoxelEngine\shaders\voxel.frag.spv;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Dev\VulkanVoxelEngine\build\CMakeFiles\Shaders</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
       <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</VerifyInputsAndOutputsExist>
@@ -362,7 +266,7 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\triangle.vert.spv;C:\Dev\VulkanVoxelEngine\build\shaders\triangle.frag.spv;C:\Dev\VulkanVoxelEngine\build\shaders\cube.vert.spv;C:\Dev\VulkanVoxelEngine\build\shaders\cube.frag.spv;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\shaders\voxel.vert.spv;C:\Dev\VulkanVoxelEngine\shaders\voxel.frag.spv;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Dev\VulkanVoxelEngine\build\CMakeFiles\Shaders</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
       <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</VerifyInputsAndOutputsExist>
@@ -374,7 +278,7 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\build\shaders\triangle.vert.spv;C:\Dev\VulkanVoxelEngine\build\shaders\triangle.frag.spv;C:\Dev\VulkanVoxelEngine\build\shaders\cube.vert.spv;C:\Dev\VulkanVoxelEngine\build\shaders\cube.frag.spv;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\shaders\voxel.vert.spv;C:\Dev\VulkanVoxelEngine\shaders\voxel.frag.spv;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Dev\VulkanVoxelEngine\build\CMakeFiles\Shaders</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
       <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</VerifyInputsAndOutputsExist>

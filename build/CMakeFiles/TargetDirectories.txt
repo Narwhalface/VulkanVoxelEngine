@@ -1,4 +1,5 @@
 C:/Dev/VulkanVoxelEngine/build/CMakeFiles/VulkanProject.dir
+C:/Dev/VulkanVoxelEngine/build/CMakeFiles/Shaders.dir
 C:/Dev/VulkanVoxelEngine/build/CMakeFiles/INSTALL.dir
 C:/Dev/VulkanVoxelEngine/build/CMakeFiles/ALL_BUILD.dir
 C:/Dev/VulkanVoxelEngine/build/CMakeFiles/ZERO_CHECK.dir

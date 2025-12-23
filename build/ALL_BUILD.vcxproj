@@ -174,6 +174,12 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </ProjectReference>
+    <ProjectReference Include="C:\Dev\VulkanVoxelEngine\build\Shaders.vcxproj">
+      <Project>{45F3BB67-BAF8-3971-AF3A-B26286CC47F0}</Project>
+      <Name>Shaders</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
     <ProjectReference Include="C:\Dev\VulkanVoxelEngine\build\VulkanProject.vcxproj">
       <Project>{F9A26FBA-F6BD-34C2-961A-46A35EE943DA}</Project>
       <Name>VulkanProject</Name>

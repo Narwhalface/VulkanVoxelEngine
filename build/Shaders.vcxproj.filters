@@ -1,16 +1,10 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\23e4eb3c93aa0bc35d6ac1342c9d7df5\cube.frag.spv.rule">
+    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\164d6edd83bdc7ecbb149c90f38297dd\voxel.frag.spv.rule">
       <Filter>CMake Rules</Filter>
     </CustomBuild>
-    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\23e4eb3c93aa0bc35d6ac1342c9d7df5\cube.vert.spv.rule">
-      <Filter>CMake Rules</Filter>
-    </CustomBuild>
-    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\23e4eb3c93aa0bc35d6ac1342c9d7df5\triangle.frag.spv.rule">
-      <Filter>CMake Rules</Filter>
-    </CustomBuild>
-    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\23e4eb3c93aa0bc35d6ac1342c9d7df5\triangle.vert.spv.rule">
+    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\164d6edd83bdc7ecbb149c90f38297dd\voxel.vert.spv.rule">
       <Filter>CMake Rules</Filter>
     </CustomBuild>
     <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\dcfa11267798ba05d3e718dd1b438d30\Shaders.rule">

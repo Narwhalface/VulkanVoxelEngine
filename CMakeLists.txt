@@ -29,6 +29,44 @@ add_executable(${PROJECT_NAME}
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+# Locate glslc for shader compilation
+set(GLSLC_HINT_DIRS)
+if(DEFINED ENV{VULKAN_SDK})
+    if(WIN32)
+        list(APPEND GLSLC_HINT_DIRS "$ENV{VULKAN_SDK}/Bin")
+    else()
+        list(APPEND GLSLC_HINT_DIRS "$ENV{VULKAN_SDK}/bin")
+    endif()
+endif()
+
+find_program(GLSLC_EXECUTABLE glslc HINTS ${GLSLC_HINT_DIRS} REQUIRED)
+
+set(SHADER_SOURCE_DIR "${CMAKE_SOURCE_DIR}/src/shaders")
+set(SHADER_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/shaders")
+
+set(SHADER_SOURCES
+    "${SHADER_SOURCE_DIR}/voxel.vert"
+    "${SHADER_SOURCE_DIR}/voxel.frag"
+)
+
+set(SPIRV_OUTPUTS)
+foreach(SHADER_FILE ${SHADER_SOURCES})
+    get_filename_component(SHADER_NAME ${SHADER_FILE} NAME)
+    set(SPIRV_FILE "${SHADER_OUTPUT_DIR}/${SHADER_NAME}.spv")
+    add_custom_command(
+        OUTPUT ${SPIRV_FILE}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
+        COMMAND ${GLSLC_EXECUTABLE} ${SHADER_FILE} -o ${SPIRV_FILE}
+        DEPENDS ${SHADER_FILE}
+        COMMENT "Compiling ${SHADER_NAME} to SPIR-V"
+        VERBATIM
+    )
+    list(APPEND SPIRV_OUTPUTS ${SPIRV_FILE})
+endforeach()
+
+add_custom_target(Shaders ALL DEPENDS ${SPIRV_OUTPUTS})
+add_dependencies(${PROJECT_NAME} Shaders)
+
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${Vulkan_INCLUDE_DIRS}
     ${GLFW_DIR}/include
