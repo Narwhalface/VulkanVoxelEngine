@@ -36,6 +36,7 @@ private:
     void createLogicalDevice();
     void createSwapchain();
     void createImageViews();
+    void createRenderPass();
     void createGraphicsPipeline();
     VkShaderModule createShaderModule(VkDevice device, const std::vector<char>& code);
 
@@ -61,6 +62,7 @@ private:
     VkQueue          graphicsQueue  = VK_NULL_HANDLE;
     VkQueue          presentQueue   = VK_NULL_HANDLE;
     QueueFamilyIndices selectedQueues;
+    VkRenderPass     renderPass     = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout;
 
     VkSwapchainKHR   swapchain            = VK_NULL_HANDLE;
