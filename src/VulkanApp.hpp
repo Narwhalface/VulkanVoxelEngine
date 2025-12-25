@@ -63,7 +63,8 @@ private:
     VkQueue          presentQueue   = VK_NULL_HANDLE;
     QueueFamilyIndices selectedQueues;
     VkRenderPass     renderPass     = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout;
+    VkPipelineLayout pipelineLayout  = VK_NULL_HANDLE;
+    VkPipeline graphicsPipeline = VK_NULL_HANDLE;
 
     VkSwapchainKHR   swapchain            = VK_NULL_HANDLE;
     VkFormat         swapchainImageFormat = VK_FORMAT_UNDEFINED;
