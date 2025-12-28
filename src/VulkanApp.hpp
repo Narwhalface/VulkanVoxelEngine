@@ -14,6 +14,9 @@ public:
     VulkanApp(GLFWwindow* window, bool enableValidation);
     void initialize();
     void cleanup();
+    void drawFrame(VulkanApp& app);
+    void renderLoop();
+    void waitIdle() const;
 
 private:
     struct QueueFamilyIndices {
@@ -39,6 +42,11 @@ private:
     void createRenderPass();
     void createGraphicsPipeline();
     VkShaderModule createShaderModule(VkDevice device, const std::vector<char>& code);
+    void createFramebuffers();
+    void createCommandPool();
+    void createCommandBuffer();
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
+    void createSyncObjects();
 
     bool checkValidationLayerSupport() const;
     bool isDeviceSuitable(VkPhysicalDevice candidate) const;
@@ -65,12 +73,17 @@ private:
     VkRenderPass     renderPass     = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout  = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
-
     VkSwapchainKHR   swapchain            = VK_NULL_HANDLE;
     VkFormat         swapchainImageFormat = VK_FORMAT_UNDEFINED;
     VkExtent2D       swapchainExtent{};
     std::vector<VkImage>     swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
+    std::vector<VkFramebuffer> swapchainFramebuffers;
+    VkCommandPool    commandPool    = VK_NULL_HANDLE;
+    VkCommandBuffer  commandBuffer  = VK_NULL_HANDLE;
+    VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
+    VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
+    VkFence inFlightFence               = VK_NULL_HANDLE;
 };
 
 #endif // VULKAN_APP_HPP
