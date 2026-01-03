@@ -33,7 +33,7 @@ void VulkanApp::initialize() {
     createGraphicsPipeline();
     createFramebuffers();
     createCommandPool();
-    createCommandBuffer();
+    createCommandBuffers();
     createSyncObjects();
 }
 
@@ -41,15 +41,7 @@ void VulkanApp::cleanup() {
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
 
-        for (auto framebuffer : swapchainFramebuffers) {
-            vkDestroyFramebuffer(device, framebuffer, nullptr);
-        }
-        swapchainFramebuffers.clear();
-
-        for (auto imageView : swapchainImageViews) {
-            vkDestroyImageView(device, imageView, nullptr);
-        }
-        swapchainImageViews.clear();
+        cleanupSwapChain();
 
         if (commandPool != VK_NULL_HANDLE) {
             vkDestroyCommandPool(device, commandPool, nullptr);
@@ -71,24 +63,10 @@ void VulkanApp::cleanup() {
             renderPass = VK_NULL_HANDLE;
         }
 
-        if (swapchain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(device, swapchain, nullptr);
-            swapchain = VK_NULL_HANDLE;
-        }
-
-        if (imageAvailableSemaphore != VK_NULL_HANDLE) {
-            vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
-            imageAvailableSemaphore = VK_NULL_HANDLE;
-        }
-
-        if (renderFinishedSemaphore != VK_NULL_HANDLE) {
-            vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
-            renderFinishedSemaphore = VK_NULL_HANDLE;
-        }
-
-        if (inFlightFence != VK_NULL_HANDLE) {
-            vkDestroyFence(device, inFlightFence, nullptr);
-            inFlightFence = VK_NULL_HANDLE;
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+            vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+            vkDestroyFence(device, inFlightFences[i], nullptr);
         }
 
         vkDestroyDevice(device, nullptr);
@@ -105,7 +83,8 @@ void VulkanApp::cleanup() {
         instance = VK_NULL_HANDLE;
     }
 
-    swapchainImages.clear();
+    glfwDestroyWindow(windowRef);
+    glfwTerminate();
 }
 
 void VulkanApp::createInstance() {
@@ -702,7 +681,6 @@ GLFWwindow* InitialiseWindow() {
     }
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
     GLFWwindow* window = glfwCreateWindow(800, 600, "32002614 Voxel Engine Prototype", nullptr, nullptr);
     if (!window) {
@@ -711,8 +689,15 @@ GLFWwindow* InitialiseWindow() {
         return nullptr;
     }
 
+    glfwSetFramebufferSizeCallback(window, VulkanApp::framebufferResizeCallback);
+
     return window;
 }
+
+    void VulkanApp::framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+        auto app = reinterpret_cast<VulkanApp*>(glfwGetWindowUserPointer(window));
+        app->framebufferResized = true;
+    }
 
 void VulkanApp::createFramebuffers() {
     swapchainFramebuffers.resize(swapchainImageViews.size());
@@ -752,14 +737,15 @@ void VulkanApp::createCommandPool() {
     }
 }
 
-void VulkanApp::createCommandBuffer() {
+void VulkanApp::createCommandBuffers() {
+    commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.commandPool        = commandPool;
     allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
+    allocInfo.commandBufferCount = (uint32_t) commandBuffers.size();
 
-    if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) != VK_SUCCESS) {
+    if (vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) != VK_SUCCESS) {
         throw std::runtime_error("Failed to allocate command buffer");
     } else {
         std::cout << "Command buffer allocated\n";
@@ -798,6 +784,10 @@ void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imag
 }
 
 void VulkanApp::createSyncObjects() {
+    imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
     VkSemaphoreCreateInfo semaphoreInfo{};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
@@ -805,11 +795,71 @@ void VulkanApp::createSyncObjects() {
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
-        vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
-        vkCreateFence(device, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create synchronization objects for a frame");
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+            vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
+            vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create synchronization objects for a frame");
+        }
     }
+}
+
+void VulkanApp::cleanupSwapChain() {
+    for (auto framebuffer : swapchainFramebuffers) {
+        if (framebuffer != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(device, framebuffer, nullptr);
+        }
+    }
+    swapchainFramebuffers.clear();
+
+    if (graphicsPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, graphicsPipeline, nullptr);
+        graphicsPipeline = VK_NULL_HANDLE;
+    }
+
+    if (pipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+        pipelineLayout = VK_NULL_HANDLE;
+    }
+
+    if (renderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(device, renderPass, nullptr);
+        renderPass = VK_NULL_HANDLE;
+    }
+
+    for (auto imageView : swapchainImageViews) {
+        if (imageView != VK_NULL_HANDLE) {
+            vkDestroyImageView(device, imageView, nullptr);
+        }
+    }
+    swapchainImageViews.clear();
+
+    if (swapchain != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(device, swapchain, nullptr);
+        swapchain = VK_NULL_HANDLE;
+    }
+
+    swapchainImages.clear();
+}
+
+void VulkanApp::recreateSwapChain() {
+    int width = 0;
+    int height = 0;
+    glfwGetFramebufferSize(windowRef, &width, &height);
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(windowRef, &width, &height);
+        glfwWaitEvents();
+    }
+
+    vkDeviceWaitIdle(device);
+
+    cleanupSwapChain();
+
+    createSwapchain();
+    createImageViews();
+    createRenderPass();
+    createGraphicsPipeline();
+    createFramebuffers();
 }
 
 void RenderLoop(VulkanApp& app, GLFWwindow* window) {
@@ -832,30 +882,40 @@ void VulkanApp::drawFrame(VulkanApp& app) {
         return;
     }
 
-    vkWaitForFences(app.device, 1, &app.inFlightFence, VK_TRUE, UINT64_MAX);
-    vkResetFences(app.device, 1, &app.inFlightFence);
+    vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
     uint32_t imageIndex;
-    vkAcquireNextImageKHR(app.device, app.swapchain, UINT64_MAX, app.imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-    vkResetCommandBuffer(app.commandBuffer, 0);
-    app.recordCommandBuffer(app.commandBuffer, imageIndex);
+    VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        framebufferResized = false;
+        recreateSwapChain();
+        return;
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        throw std::runtime_error("Failed to acquire swapchain image");
+    }
+
+    vkResetFences(device, 1, &inFlightFences[currentFrame]);
+
+    vkResetCommandBuffer(app.commandBuffers[currentFrame], 0);
+    app.recordCommandBuffer(app.commandBuffers[currentFrame], imageIndex);
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkSemaphore waitSemaphores[] = {app.imageAvailableSemaphore};
+    VkSemaphore waitSemaphores[] = {app.imageAvailableSemaphores[currentFrame]};
     VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores    = waitSemaphores;
     submitInfo.pWaitDstStageMask  = waitStages;
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers    = &app.commandBuffer;
+    submitInfo.pCommandBuffers    = &app.commandBuffers[currentFrame];
 
-    VkSemaphore signalSemaphores[] = {app.renderFinishedSemaphore};
+    VkSemaphore signalSemaphores[] = {app.renderFinishedSemaphores[currentFrame]};
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores    = signalSemaphores;
 
-    if (vkQueueSubmit(app.graphicsQueue, 1, &submitInfo, app.inFlightFence) != VK_SUCCESS) {
+    if (vkQueueSubmit(app.graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
         throw std::runtime_error("Failed to submit draw command buffer");
     }
 
@@ -870,10 +930,16 @@ void VulkanApp::drawFrame(VulkanApp& app) {
     presentInfo.pImageIndices   = &imageIndex;
 
     presentInfo.pResults = nullptr;
-    VkResult presentRes = vkQueuePresentKHR(app.presentQueue, &presentInfo);
-    if (presentRes != VK_SUCCESS) {
+    result = vkQueuePresentKHR(app.presentQueue, &presentInfo);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
+        framebufferResized = false;
+        recreateSwapChain();
+    } else if (result != VK_SUCCESS) {
         throw std::runtime_error("Failed to present swapchain image");
     }
+
+    currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
 void VulkanApp::waitIdle() const {
@@ -911,8 +977,6 @@ int main(int argc, char** argv) {
     } catch (const std::exception& e) {
         std::cerr << "Fatal error: " << e.what() << "\n";
         app.cleanup();
-        glfwDestroyWindow(window);
-        glfwTerminate();
         return EXIT_FAILURE;
     }
 

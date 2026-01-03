@@ -14,9 +14,12 @@ public:
     VulkanApp(GLFWwindow* window, bool enableValidation);
     void initialize();
     void cleanup();
+    void cleanupSwapChain();
     void drawFrame(VulkanApp& app);
     void renderLoop();
     void waitIdle() const;
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
+    static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
 
 private:
     struct QueueFamilyIndices {
@@ -44,9 +47,9 @@ private:
     VkShaderModule createShaderModule(VkDevice device, const std::vector<char>& code);
     void createFramebuffers();
     void createCommandPool();
-    void createCommandBuffer();
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
+    void createCommandBuffers();
     void createSyncObjects();
+    void recreateSwapChain();
 
     bool checkValidationLayerSupport() const;
     bool isDeviceSuitable(VkPhysicalDevice candidate) const;
@@ -62,6 +65,7 @@ private:
 
     const std::vector<const char*> validationLayers;
     const std::vector<const char*> deviceExtensions;
+    const int MAX_FRAMES_IN_FLIGHT = 2;
 
     VkInstance       instance       = VK_NULL_HANDLE;
     VkSurfaceKHR     surface        = VK_NULL_HANDLE;
@@ -80,10 +84,12 @@ private:
     std::vector<VkImageView> swapchainImageViews;
     std::vector<VkFramebuffer> swapchainFramebuffers;
     VkCommandPool    commandPool    = VK_NULL_HANDLE;
-    VkCommandBuffer  commandBuffer  = VK_NULL_HANDLE;
-    VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
-    VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
-    VkFence inFlightFence               = VK_NULL_HANDLE;
+    std::vector<VkCommandBuffer>  commandBuffers;
+    std::vector<VkSemaphore> imageAvailableSemaphores;
+    std::vector<VkSemaphore> renderFinishedSemaphores;
+    std::vector<VkFence> inFlightFences;
+    uint32_t currentFrame = 0;
+    bool framebufferResized = false;
 };
 
 #endif // VULKAN_APP_HPP
