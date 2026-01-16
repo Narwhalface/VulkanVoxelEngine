@@ -47,6 +47,7 @@ private:
     VkShaderModule createShaderModule(VkDevice device, const std::vector<char>& code);
     void createFramebuffers();
     void createCommandPool();
+    void createVertexBuffer();
     void createCommandBuffers();
     void createSyncObjects();
     void recreateSwapChain();
@@ -90,6 +91,9 @@ private:
     std::vector<VkFence> inFlightFences;
     uint32_t currentFrame = 0;
     bool framebufferResized = false;
+    VkBuffer vertexBuffer = VK_NULL_HANDLE;
+    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+    VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
 };
 
 #endif // VULKAN_APP_HPP
