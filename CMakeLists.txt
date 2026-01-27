@@ -25,6 +25,10 @@ set(GLM_DIR "${CMAKE_SOURCE_DIR}/external/glm")
 
 add_executable(${PROJECT_NAME}
     src/main.cpp
+    src/VulkanApp.cpp
+    src/VulkanApp.hpp
+    src/World.cpp
+    src/World.hpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)

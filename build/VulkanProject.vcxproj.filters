@@ -4,11 +4,28 @@
     <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\VulkanApp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\World.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\VulkanApp.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\World.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="C:\Dev\VulkanVoxelEngine\CMakeLists.txt" />
   </ItemGroup>
   <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{BB0EC8F2-5FC1-37D9-B8FA-73FDAF135515}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files">
       <UniqueIdentifier>{6032BD12-F43F-3437-99BB-CD769DA84DC5}</UniqueIdentifier>
     </Filter>

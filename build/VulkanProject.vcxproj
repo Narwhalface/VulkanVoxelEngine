@@ -341,6 +341,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\main.cpp" />
+    <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\VulkanApp.cpp" />
+    <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\VulkanApp.hpp" />
+    <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\World.cpp" />
+    <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\World.hpp" />
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>
