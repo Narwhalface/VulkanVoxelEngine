@@ -7,12 +7,24 @@
     <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\VulkanApp.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\Camera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\InputController.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\World.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\VulkanApp.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\Camera.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\InputController.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\World.hpp">

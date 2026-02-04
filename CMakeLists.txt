@@ -27,11 +27,20 @@ add_executable(${PROJECT_NAME}
     src/main.cpp
     src/VulkanApp.cpp
     src/VulkanApp.hpp
+    src/Camera.cpp
+    src/Camera.hpp
+    src/InputController.cpp
+    src/InputController.hpp
     src/World.cpp
     src/World.hpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
+)
 
 # Locate glslc for shader compilation
 set(GLSLC_HINT_DIRS)

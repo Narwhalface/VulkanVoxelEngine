@@ -179,6 +179,20 @@ void VulkanApp::initialize() {
     createDescriptorSets();
     createCommandBuffers();
     createSyncObjects();
+
+    const float radius = std::max(meshRadius * 1.8f, 30.0f);
+    const glm::vec3 initialPosition = meshCenter + glm::vec3(radius, radius * 0.75f, radius);
+    camera.setPosition(initialPosition);
+    camera.lookAt(meshCenter);
+
+    const float aspect = swapchainExtent.height == 0
+                             ? 1.0f
+                             : swapchainExtent.width / static_cast<float>(swapchainExtent.height);
+    camera.setPerspective(45.0f, aspect, 0.1f, radius * 4.0f);
+
+    inputController.attach(windowRef, &camera);
+    inputController.syncOrientationFromCamera();
+    lastFrameTimeSeconds = glfwGetTime();
 }
 
 void VulkanApp::cleanup() {
@@ -1425,10 +1439,16 @@ void VulkanApp::recreateSwapChain() {
 }
 
 void VulkanApp::drawFrame(VulkanApp& app) {
+    const double currentTime = glfwGetTime();
+    double deltaSeconds = currentTime - lastFrameTimeSeconds;
+    lastFrameTimeSeconds = currentTime;
+    deltaSeconds = std::clamp(deltaSeconds, 0.0, 0.25);
+
     if (app.swapchainExtent.width == 0 || app.swapchainExtent.height == 0) {
-        glfwWaitEventsTimeout(0.016);
         return;
     }
+
+    inputController.update(deltaSeconds);
 
     vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
@@ -1496,11 +1516,16 @@ void VulkanApp::updateUniformBuffer(uint32_t currentImage) {
     UniformBufferObject ubo{};
     ubo.model = glm::mat4(1.0f);
 
+    const float aspect = swapchainExtent.height == 0
+                             ? 1.0f
+                             : swapchainExtent.width / static_cast<float>(swapchainExtent.height);
     const float radius = std::max(meshRadius * 1.8f, 30.0f);
-    const glm::vec3 eye = meshCenter + glm::vec3(radius, radius * 0.75f, radius);
-    ubo.view  = glm::lookAt(eye, meshCenter, glm::vec3(0.0f, 1.0f, 0.0f));
-    ubo.proj  = glm::perspective(glm::radians(45.0f), swapchainExtent.width / static_cast<float>(swapchainExtent.height), 0.1f, radius * 4.0f);
-    ubo.proj[1][1] *= -1;
+    const float distanceToCenter = glm::length(camera.position() - meshCenter);
+    const float farPlane = std::max(distanceToCenter + radius * 2.0f, radius * 4.0f);
+    camera.setPerspective(45.0f, aspect, 0.1f, std::max(farPlane, 500.0f));
+
+    ubo.view = camera.viewMatrix();
+    ubo.proj = camera.projectionMatrix();
 
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }

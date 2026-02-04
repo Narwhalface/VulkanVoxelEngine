@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "Camera.hpp"
+#include "InputController.hpp"
 #include "World.hpp"
 
 struct Vertex {
@@ -152,6 +154,9 @@ private:
     TerrainSettings terrainSettings{};
     glm::vec3 meshCenter{0.0f};
     float meshRadius = 1.0f;
+    Camera camera;
+    InputController inputController;
+    double lastFrameTimeSeconds = 0.0;
 };
 
 #endif // VULKAN_APP_HPP
