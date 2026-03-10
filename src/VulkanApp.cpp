@@ -33,6 +33,8 @@ std::filesystem::path gExecutableDir;
 constexpr int kChunkSize = Chunk::SIZE;
 
 int floorDiv(int value, int divisor) noexcept {
+    // Divides value by divisor with floor semantics for negatives; returns the floored quotient.
+    // Performs mathematical floor division so negative coordinates map to the expected chunk.
     int quotient = value / divisor;
     const int remainder = value % divisor;
     if (remainder != 0 && ((remainder < 0) != (divisor < 0))) {
@@ -56,6 +58,8 @@ const std::array<FaceDefinition, 6> gFaceDefinitions = {{
 }};
 
 glm::vec3 voxelBaseColor(uint8_t type, const glm::ivec3& normal) {
+    // Maps voxel type and face normal to an RGB color; returns the selected base color.
+    // Chooses a base albedo by voxel type, with directional tinting for grass faces.
     switch (type) {
         case 2:
             if (normal.y > 0) {
@@ -74,6 +78,8 @@ glm::vec3 voxelBaseColor(uint8_t type, const glm::ivec3& normal) {
 }
 
 float shadeForNormal(const glm::ivec3& normal) {
+    // Computes directional shading from a face normal; returns a brightness multiplier.
+    // Returns a simple face-lighting factor based on axis orientation.
     if (normal.y > 0) {
         return 1.0f;
     }
@@ -88,6 +94,7 @@ float shadeForNormal(const glm::ivec3& normal) {
 }
 
 VkVertexInputBindingDescription Vertex::getBindingDescription() {
+    // Builds the vertex binding layout for Vertex data; returns Vulkan binding metadata.
     VkVertexInputBindingDescription bindingDescription{};
     bindingDescription.binding   = 0;
     bindingDescription.stride    = sizeof(Vertex);
@@ -96,6 +103,7 @@ VkVertexInputBindingDescription Vertex::getBindingDescription() {
 }
 
 std::array<VkVertexInputAttributeDescription, 2> Vertex::getAttributeDescriptions() {
+    // Builds position/color vertex attributes; returns two Vulkan attribute descriptions.
     std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
 
     attributeDescriptions[0].binding  = 0;
@@ -112,6 +120,8 @@ std::array<VkVertexInputAttributeDescription, 2> Vertex::getAttributeDescription
 }
 
 static std::filesystem::path resolveAssetPath(const std::filesystem::path& relative) {
+    // Resolves a relative asset path against known roots; returns the first existing path or input.
+    // Searches upward from current and executable directories to find an existing asset path.
     std::vector<std::filesystem::path> roots;
     auto registerRoots = [&roots](const std::filesystem::path& source) {
         if (source.empty()) {
@@ -147,6 +157,8 @@ static std::filesystem::path resolveAssetPath(const std::filesystem::path& relat
 }
 
 static std::vector<char> readfile(const std::string& filename) {
+    // Reads a binary file into memory using an asset-relative filename; returns raw file bytes.
+    // Loads a binary file into memory (used for SPIR-V shader blobs).
     const auto assetPath = resolveAssetPath(filename);
 
     std::ifstream file(assetPath, std::ios::ate | std::ios::binary);
@@ -164,16 +176,20 @@ static std::vector<char> readfile(const std::string& filename) {
 }
 
 void setExecutableDirectory(const std::filesystem::path& path) {
+    // Sets executable directory used by asset lookup; takes a filesystem path and returns nothing.
+    // Stores the executable directory so runtime asset lookup can resolve relative paths.
     gExecutableDir = path;
 }
 
 VulkanApp::VulkanApp(GLFWwindow* window, bool enableValidation)
+// Initializes app state from a GLFW window handle and validation flag; constructs a VulkanApp instance.
     : windowRef(window),
       enableValidationLayers(enableValidation),
       validationLayers({"VK_LAYER_KHRONOS_validation"}),
       deviceExtensions({VK_KHR_SWAPCHAIN_EXTENSION_NAME}) {}
 
 void VulkanApp::initialize() {
+    // Initializes Vulkan, terrain, threading, and camera systems; takes no args and returns nothing.
     createInstance();
     createSurface();
     pickPhysicalDevice();
@@ -206,7 +222,7 @@ void VulkanApp::initialize() {
     }
 
     if (scriptValues.renderDistanceChunks.has_value()) {
-        const int clampedDistance = (std::max)(2, (std::min)(16, *scriptValues.renderDistanceChunks));
+        const int clampedDistance = (std::max)(2, *scriptValues.renderDistanceChunks);
         renderDistanceChunks.store(clampedDistance, std::memory_order_relaxed);
     }
 
@@ -276,6 +292,7 @@ void VulkanApp::initialize() {
 }
 
 void VulkanApp::cleanup() {
+    // Stops workers and releases Vulkan resources in shutdown order; takes no args and returns nothing.
     chunkWorkerRunning.store(false, std::memory_order_relaxed);
     generationQueueCv.notify_all();
     meshQueueCv.notify_all();
@@ -373,6 +390,7 @@ void VulkanApp::cleanup() {
 }
 
 void VulkanApp::createInstance() {
+    // Creates the Vulkan instance with required extensions/layers; takes no args and returns nothing.
     if (enableValidationLayers && !checkValidationLayerSupport()) {
         throw std::runtime_error("Validation layers requested, but not available");
     }
@@ -411,6 +429,7 @@ void VulkanApp::createInstance() {
 }
 
 bool VulkanApp::checkValidationLayerSupport() const {
+    // Checks whether requested validation layers are present; returns true when all are available.
     uint32_t layerCount = 0;
     vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
     std::vector<VkLayerProperties> availableLayers(layerCount);
@@ -434,6 +453,7 @@ bool VulkanApp::checkValidationLayerSupport() const {
 }
 
 void VulkanApp::createSurface() {
+    // Creates a Vulkan surface from the GLFW window; takes no args and returns nothing.
     if (glfwCreateWindowSurface(instance, windowRef, nullptr, &surface) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create window surface");
     }
@@ -442,6 +462,7 @@ void VulkanApp::createSurface() {
 }
 
 void VulkanApp::pickPhysicalDevice() {
+    // Selects the first suitable physical device and queue families; takes no args and returns nothing.
     uint32_t deviceCount = 0;
     if (vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr) != VK_SUCCESS || deviceCount == 0) {
         throw std::runtime_error("Failed to find GPUs with Vulkan support");
@@ -471,6 +492,7 @@ void VulkanApp::pickPhysicalDevice() {
 }
 
 bool VulkanApp::isDeviceSuitable(VkPhysicalDevice candidate) const {
+    // Evaluates a candidate GPU for required queues/extensions/swapchain; returns suitability.
     QueueFamilyIndices indices = findQueueFamilies(candidate);
     bool extensionsSupported   = checkDeviceExtensionSupport(candidate);
 
@@ -484,6 +506,7 @@ bool VulkanApp::isDeviceSuitable(VkPhysicalDevice candidate) const {
 }
 
 VulkanApp::QueueFamilyIndices VulkanApp::findQueueFamilies(VkPhysicalDevice candidate) const {
+    // Finds graphics and present queue families on a device; returns discovered family indices.
     QueueFamilyIndices indices;
 
     uint32_t queueFamilyCount = 0;
@@ -511,6 +534,7 @@ VulkanApp::QueueFamilyIndices VulkanApp::findQueueFamilies(VkPhysicalDevice cand
 }
 
 bool VulkanApp::checkDeviceExtensionSupport(VkPhysicalDevice candidate) const {
+    // Verifies required device extensions for a GPU; returns true when all are supported.
     uint32_t extensionCount = 0;
     vkEnumerateDeviceExtensionProperties(candidate, nullptr, &extensionCount, nullptr);
 
@@ -526,6 +550,7 @@ bool VulkanApp::checkDeviceExtensionSupport(VkPhysicalDevice candidate) const {
 }
 
 void VulkanApp::createLogicalDevice() {
+    // Creates logical device and retrieves graphics/present queues; takes no args and returns nothing.
     std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
     std::set<uint32_t> uniqueFamilies = {
         selectedQueues.graphicsFamily,
@@ -571,6 +596,7 @@ void VulkanApp::createLogicalDevice() {
 }
 
 VulkanApp::SwapChainSupportDetails VulkanApp::querySwapChainSupport(VkPhysicalDevice candidate) const {
+    // Queries swapchain capabilities, formats, and present modes for a device; returns support details.
     SwapChainSupportDetails details{};
 
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(candidate, surface, &details.capabilities);
@@ -593,6 +619,7 @@ VulkanApp::SwapChainSupportDetails VulkanApp::querySwapChainSupport(VkPhysicalDe
 }
 
 VkSurfaceFormatKHR VulkanApp::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats) const {
+    // Chooses a preferred surface format from available formats; returns selected format.
     for (const auto& format : formats) {
         if (format.format == VK_FORMAT_B8G8R8A8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             return format;
@@ -603,6 +630,7 @@ VkSurfaceFormatKHR VulkanApp::chooseSwapSurfaceFormat(const std::vector<VkSurfac
 }
 
 VkPresentModeKHR VulkanApp::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& presentModes) const {
+    // Chooses a presentation mode from available modes; returns selected present mode.
     for (VkPresentModeKHR mode : presentModes) {
         if (mode == VK_PRESENT_MODE_FIFO_KHR) {
             return mode;
@@ -613,6 +641,7 @@ VkPresentModeKHR VulkanApp::chooseSwapPresentMode(const std::vector<VkPresentMod
 }
 
 VkExtent2D VulkanApp::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) const {
+    // Chooses swap extent using surface capabilities and framebuffer size; returns chosen extent.
     if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
         return capabilities.currentExtent;
     }
@@ -633,6 +662,7 @@ VkExtent2D VulkanApp::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilit
 }
 
 void VulkanApp::createSwapchain() {
+    // Creates swapchain and stores images/format/extent; takes no args and returns nothing.
     SwapChainSupportDetails support = querySwapChainSupport(physicalDevice);
 
     VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(support.formats);
@@ -688,6 +718,7 @@ void VulkanApp::createSwapchain() {
 }
 
 void VulkanApp::createImageViews() {
+    // Creates image views for each swapchain image; takes no args and returns nothing.
     swapchainImageViews.resize(swapchainImages.size());
 
     for (size_t i = 0; i < swapchainImages.size(); ++i) {
@@ -696,6 +727,7 @@ void VulkanApp::createImageViews() {
 }
 
 VkShaderModule VulkanApp::createShaderModule(VkDevice device, const std::vector<char>& code) {
+    // Creates a shader module from SPIR-V bytes for a device; returns shader module handle.
     VkShaderModuleCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = code.size();
@@ -710,6 +742,7 @@ VkShaderModule VulkanApp::createShaderModule(VkDevice device, const std::vector<
 }
 
 void VulkanApp::createDescriptorSetLayout() {
+    // Creates descriptor set layout for uniform bindings; takes no args and returns nothing.
     VkDescriptorSetLayoutBinding uboLayoutBinding{};
     uboLayoutBinding.binding            = 0;
     uboLayoutBinding.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -728,6 +761,7 @@ void VulkanApp::createDescriptorSetLayout() {
 }
 
 void VulkanApp::createDescriptorPool() {
+    // Creates descriptor pool sized for frames in flight; takes no args and returns nothing.
     VkDescriptorPoolSize poolSize{};
     poolSize.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
@@ -744,6 +778,7 @@ void VulkanApp::createDescriptorPool() {
 }
 
 void VulkanApp::createDescriptorSets() {
+    // Allocates and writes descriptor sets for uniform buffers; takes no args and returns nothing.
     std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
 
     VkDescriptorSetAllocateInfo allocInfo{};
@@ -777,6 +812,7 @@ void VulkanApp::createDescriptorSets() {
 }
 
 void VulkanApp::createGraphicsPipeline() {
+    // Creates shader stages, pipeline layout, and graphics pipeline state; takes no args and returns nothing.
     auto vertShaderCode = readfile("shaders/voxel.vert.spv");
     auto fragShaderCode = readfile("shaders/voxel.frag.spv");
 
@@ -926,6 +962,7 @@ void VulkanApp::createGraphicsPipeline() {
 }
 
 void VulkanApp::createRenderPass() {
+    // Creates color/depth render pass attachments and subpass; takes no args and returns nothing.
 
     if (depthImageFormat == VK_FORMAT_UNDEFINED) {
         depthImageFormat = findDepthFormat();
@@ -992,11 +1029,13 @@ void VulkanApp::createRenderPass() {
 }
 
 void VulkanApp::framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+    // GLFW resize callback that marks swapchain recreation state; takes window/size and returns nothing.
     auto app = reinterpret_cast<VulkanApp*>(glfwGetWindowUserPointer(window));
     app->framebufferResized = true;
 }
 
 void VulkanApp::createFramebuffers() {
+    // Creates framebuffer objects for each swapchain image view; takes no args and returns nothing.
     swapchainFramebuffers.resize(swapchainImageViews.size());
 
     for (size_t i = 0; i < swapchainImageViews.size(); ++i) {
@@ -1023,6 +1062,7 @@ void VulkanApp::createFramebuffers() {
 }
 
 void VulkanApp::createCommandPool() {
+    // Creates the graphics command pool used for command buffers; takes no args and returns nothing.
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -1036,6 +1076,7 @@ void VulkanApp::createCommandPool() {
 }
 
 void VulkanApp::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+    // Creates a Vulkan buffer from size/usage/properties and outputs buffer + memory handles.
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size        = size;
@@ -1062,6 +1103,7 @@ void VulkanApp::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemo
 }
 
 void VulkanApp::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
+    // Creates an image with given dimensions/format/usage and outputs image + memory handles.
     VkImageCreateInfo imageInfo{};
     imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType     = VK_IMAGE_TYPE_2D;
@@ -1097,6 +1139,7 @@ void VulkanApp::createImage(uint32_t width, uint32_t height, VkFormat format, Vk
 }
 
 VkImageView VulkanApp::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) {
+    // Creates an image view for an image/aspect combination; returns created image view handle.
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image                           = image;
@@ -1121,6 +1164,7 @@ VkImageView VulkanApp::createImageView(VkImage image, VkFormat format, VkImageAs
 }
 
 void VulkanApp::buildVoxelMesh() {
+    // Builds full CPU voxel mesh around current center chunk; takes no args and returns nothing.
     constexpr int chunkSize = Chunk::SIZE;
     const int chunkRadius = renderDistanceChunks.load(std::memory_order_relaxed);
     const ChunkCoord centerChunk = requestedTerrainCenterChunk;
@@ -1312,6 +1356,7 @@ void VulkanApp::buildVoxelMesh() {
 }
 
 void VulkanApp::createVertexBuffer() {
+    // Uploads voxelVertices into GPU vertex buffer resources; takes no args and returns nothing.
     if (voxelVertices.empty()) {
         std::cerr << "Warning: Creating vertex buffer with no vertices\n";
         return;
@@ -1336,6 +1381,7 @@ void VulkanApp::createVertexBuffer() {
 }
 
 void VulkanApp::createIndexBuffer() {
+    // Uploads voxelIndices into GPU index buffer resources; takes no args and returns nothing.
     if (voxelIndices.empty()) {
         std::cerr << "Warning: Creating index buffer with no indices\n";
         return;
@@ -1360,6 +1406,7 @@ void VulkanApp::createIndexBuffer() {
 }
 
 void VulkanApp::createUniformBuffers() {
+    // Allocates and maps per-frame uniform buffers; takes no args and returns nothing.
     VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
     uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
@@ -1373,6 +1420,7 @@ void VulkanApp::createUniformBuffers() {
 }
 
 void VulkanApp::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
+    // Copies size bytes from srcBuffer to dstBuffer using one-time commands; returns nothing.
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -1421,6 +1469,7 @@ void VulkanApp::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize 
 }
 
 uint32_t VulkanApp::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+    // Finds a compatible memory type index matching filter/properties; returns memory type index.
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
 
@@ -1434,6 +1483,7 @@ uint32_t VulkanApp::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags pr
 }
 
 VkFormat VulkanApp::findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) const {
+    // Finds first candidate format supporting requested tiling/features; returns selected format.
     for (VkFormat format : candidates) {
         VkFormatProperties props;
         vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
@@ -1451,6 +1501,7 @@ VkFormat VulkanApp::findSupportedFormat(const std::vector<VkFormat>& candidates,
 }
 
 VkFormat VulkanApp::findDepthFormat() const {
+    // Selects a supported depth format from preferred candidates; returns depth-capable format.
     return findSupportedFormat(
         {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
         VK_IMAGE_TILING_OPTIMAL,
@@ -1458,10 +1509,12 @@ VkFormat VulkanApp::findDepthFormat() const {
 }
 
 bool VulkanApp::hasStencilComponent(VkFormat format) const {
+    // Tests whether the provided depth format includes a stencil component; returns true/false.
     return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
 }
 
 void VulkanApp::createDepthResources() {
+    // Creates depth images, memory, and views for swapchain images; takes no args and returns nothing.
     depthImageFormat = findDepthFormat();
 
     const size_t imageCount = swapchainImages.size();
@@ -1490,6 +1543,7 @@ void VulkanApp::createDepthResources() {
 }
 
 void VulkanApp::createCommandBuffers() {
+    // Allocates primary command buffers for in-flight frames; takes no args and returns nothing.
     commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1505,6 +1559,7 @@ void VulkanApp::createCommandBuffers() {
 }
 
 void VulkanApp::createSyncObjects() {
+    // Creates per-frame semaphores and fences for rendering sync; takes no args and returns nothing.
     imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
@@ -1526,6 +1581,7 @@ void VulkanApp::createSyncObjects() {
 }
 
 void VulkanApp::cleanupSwapChain() {
+    // Destroys all swapchain-dependent Vulkan resources and clears containers; returns nothing.
     for (auto framebuffer : swapchainFramebuffers) {
         if (framebuffer != VK_NULL_HANDLE) {
             vkDestroyFramebuffer(device, framebuffer, nullptr);
@@ -1586,6 +1642,7 @@ void VulkanApp::cleanupSwapChain() {
 }
 
 void VulkanApp::recreateSwapChain() {
+    // Recreates swapchain resources after resize/minimize events; takes no args and returns nothing.
     int width = 0;
     int height = 0;
     glfwGetFramebufferSize(windowRef, &width, &height);
@@ -1607,6 +1664,7 @@ void VulkanApp::recreateSwapChain() {
 }
 
 void VulkanApp::updateUniformBuffer(uint32_t currentImage) {
+    // Updates model/view/projection data for current frame image; takes frame index and returns nothing.
     UniformBufferObject ubo{};
     ubo.model = glm::mat4(1.0f);
 
@@ -1630,15 +1688,18 @@ void VulkanApp::updateUniformBuffer(uint32_t currentImage) {
 }
 
 void VulkanApp::waitIdle() const {
+    // Waits until device finishes all queued work; takes no args and returns nothing.
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
     }
 }
 void VulkanApp::rebuildVoxelMesh() {
+    // Requests terrain window refresh to trigger mesh rebuild; takes no args and returns nothing.
     requestTerrainWindow(requestedTerrainCenterChunk);
 }
 
 void VulkanApp::buildVoxelMeshAsync() {
+    // Builds mesh data asynchronously into pending buffers; takes no args and returns nothing.
     // Background thread function - builds mesh without blocking main thread
     constexpr int chunkSize = Chunk::SIZE;
     const int chunkRadius = renderDistanceChunks.load(std::memory_order_relaxed);
@@ -1834,6 +1895,7 @@ void VulkanApp::buildVoxelMeshAsync() {
 }
 
 void VulkanApp::uploadPendingMesh() {
+    // Swaps pending mesh into active data and uploads buffers to GPU; takes no args and returns nothing.
     // Main thread only - swap pending mesh with active and upload to GPU
     {
         std::lock_guard<std::mutex> lock(meshDataLock);
@@ -1874,6 +1936,7 @@ void VulkanApp::uploadPendingMesh() {
 }
 
 VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coord) {
+    // Generates meshed geometry for one chunk coordinate; returns pending mesh vertices/indices/bounds.
     PendingChunkMesh result{};
     result.coord = coord;
 
@@ -2168,6 +2231,7 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
 }
 
 void VulkanApp::destroyChunkMeshResources(GpuChunkMesh& mesh) {
+    // Destroys GPU buffers owned by a chunk mesh and resets handles; takes mesh ref and returns nothing.
     if (mesh.vertexBuffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(device, mesh.vertexBuffer, nullptr);
         mesh.vertexBuffer = VK_NULL_HANDLE;
@@ -2188,6 +2252,7 @@ void VulkanApp::destroyChunkMeshResources(GpuChunkMesh& mesh) {
 }
 
 bool VulkanApp::isChunkVisible(const GpuChunkMesh& mesh, const std::array<glm::vec4, 6>& frustumPlanes, float maxVisibleDistance, const glm::vec3& cameraPos) const {
+    // Performs frustum and distance culling for a chunk mesh; returns true when chunk should render.
     const glm::vec3 chunkCenter = (mesh.minCorner + mesh.maxCorner) * 0.5f;
     const float chunkRadius = glm::length(mesh.maxCorner - chunkCenter);
     const glm::vec3 toChunk = chunkCenter - cameraPos;
@@ -2213,6 +2278,7 @@ bool VulkanApp::isChunkVisible(const GpuChunkMesh& mesh, const std::array<glm::v
 }
 
 void VulkanApp::enqueueChunkMeshForDestruction(GpuChunkMesh&& mesh) {
+    // Defers chunk mesh destruction until GPU submissions are safe; takes mesh rvalue and returns nothing.
     if (mesh.vertexBuffer == VK_NULL_HANDLE && mesh.indexBuffer == VK_NULL_HANDLE) {
         return;
     }
@@ -2224,6 +2290,7 @@ void VulkanApp::enqueueChunkMeshForDestruction(GpuChunkMesh&& mesh) {
 }
 
 void VulkanApp::processDeferredDestroyQueue() {
+    // Destroys deferred chunk meshes whose retire frame is complete; takes no args and returns nothing.
     while (!deferredDestroyQueue.empty()) {
         DeferredDestroyEntry& entry = deferredDestroyQueue.front();
         if (entry.retireAfterCompletedSubmission > completedSubmissionCount) {
@@ -2235,6 +2302,7 @@ void VulkanApp::processDeferredDestroyQueue() {
 }
 
 void VulkanApp::updateActiveMeshBounds() {
+    // Recomputes global mesh center/radius from active chunk bounds; takes no args and returns nothing.
     if (activeChunkMeshes.empty()) {
         meshCenter = glm::vec3(0.0f);
         meshRadius = 1.0f;
@@ -2265,6 +2333,7 @@ void VulkanApp::updateActiveMeshBounds() {
 }
 
 void VulkanApp::clearAllChunkMeshes() {
+    // Releases all active/deferred/pending chunk mesh GPU resources; takes no args and returns nothing.
     processDeferredDestroyQueue();
     for (auto& [coord, mesh] : activeChunkMeshes) {
         destroyChunkMeshResources(mesh);
@@ -2308,6 +2377,7 @@ void VulkanApp::clearAllChunkMeshes() {
 }
 
 ChunkCoord VulkanApp::chunkForPosition(const glm::vec3& position) const {
+    // Converts world-space position to integer chunk coordinate; returns containing chunk.
     const int worldX = static_cast<int>(std::floor(position.x));
     const int worldY = static_cast<int>(std::floor(position.y));
     const int worldZ = static_cast<int>(std::floor(position.z));
@@ -2319,6 +2389,7 @@ ChunkCoord VulkanApp::chunkForPosition(const glm::vec3& position) const {
 }
 
 float VulkanApp::sampleTerrainHeightAt(int worldX, int worldZ) const {
+    // Samples highest solid voxel at X/Z and returns terrain height in world units.
     std::shared_lock<std::shared_mutex> worldLock(worldDataMutex);
     const int activeRenderDistance = renderDistanceChunks.load(std::memory_order_relaxed);
     const int minWorldY = (loadedTerrainCenterChunk.y - activeRenderDistance) * kChunkSize;
@@ -2335,6 +2406,7 @@ float VulkanApp::sampleTerrainHeightAt(int worldX, int worldZ) const {
 }
 
 void VulkanApp::placeCameraOnTerrain() {
+    // Places camera above sampled terrain near loaded center chunk; takes no args and returns nothing.
     const int sampleX = loadedTerrainCenterChunk.x * kChunkSize + (kChunkSize / 2);
     const int sampleZ = loadedTerrainCenterChunk.z * kChunkSize + (kChunkSize / 2);
     const float terrainHeight = sampleTerrainHeightAt(sampleX, sampleZ);
@@ -2351,6 +2423,7 @@ void VulkanApp::placeCameraOnTerrain() {
 }
 
 void VulkanApp::processCompletedUploadBatches() {
+    // Finalizes completed upload batches and installs ready chunk meshes; takes no args and returns nothing.
     bool boundsDirty = false;
 
     while (!pendingUploadBatches.empty()) {

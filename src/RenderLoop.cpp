@@ -21,6 +21,7 @@ struct DrawChunkEntry {
 };
 
 int floorDiv(int value, int divisor) noexcept {
+    // Divides value by divisor with floor semantics for negative values; returns floored quotient.
     int quotient = value / divisor;
     const int remainder = value % divisor;
     if (remainder != 0 && ((remainder < 0) != (divisor < 0))) {
@@ -30,6 +31,7 @@ int floorDiv(int value, int divisor) noexcept {
 }
 
 std::array<glm::vec4, 6> extractFrustumPlanes(const glm::mat4& viewProjection) {
+    // Extracts normalized frustum planes from a view-projection matrix input; returns six clipping planes.
     const glm::vec4 row0(viewProjection[0][0], viewProjection[1][0], viewProjection[2][0], viewProjection[3][0]);
     const glm::vec4 row1(viewProjection[0][1], viewProjection[1][1], viewProjection[2][1], viewProjection[3][1]);
     const glm::vec4 row2(viewProjection[0][2], viewProjection[1][2], viewProjection[2][2], viewProjection[3][2]);
@@ -55,6 +57,7 @@ std::array<glm::vec4, 6> extractFrustumPlanes(const glm::mat4& viewProjection) {
 }
 
 void VulkanApp::drawFrame(VulkanApp& app) {
+    // Advances one frame: input handling, streaming updates, draw submission, and present; takes app and returns nothing.
     const double currentTime = glfwGetTime();
     double deltaSeconds = currentTime - lastFrameTimeSeconds;
     lastFrameTimeSeconds = currentTime;
@@ -210,6 +213,7 @@ void VulkanApp::drawFrame(VulkanApp& app) {
 }
 
 void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+    // Records draw commands for one swapchain image; inputs commandBuffer/imageIndex and outputs no return value.
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = 0;
@@ -287,6 +291,7 @@ void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imag
 }
 
 void VulkanApp::requestTerrainWindow(const ChunkCoord& centerChunk) {
+    // Rebuilds chunk streaming targets around centerChunk and schedules generation/meshing jobs; outputs no return value.
     const int minTerrainHeight = static_cast<int>(std::floor(terrainSettings.baseHeight - terrainSettings.elevationAmplitude)) - 1;
     const int maxTerrainHeight = static_cast<int>(std::ceil(terrainSettings.baseHeight + terrainSettings.elevationAmplitude)) + 1;
     const int maxFilledHeight = (std::max)(maxTerrainHeight, terrainSettings.waterLevel + 1);
@@ -528,6 +533,7 @@ void VulkanApp::requestTerrainWindow(const ChunkCoord& centerChunk) {
 }
 
 void VulkanApp::runChunkGenerationWorker() {
+    // Worker loop that consumes generation jobs and ensures chunks exist; takes no inputs and outputs no return value.
     while (chunkWorkerRunning.load(std::memory_order_relaxed)) {
         ChunkCoord coord{};
         bool hasJob = false;
@@ -583,6 +589,7 @@ void VulkanApp::runChunkGenerationWorker() {
 }
 
 void VulkanApp::runChunkMeshWorker() {
+    // Worker loop that consumes meshing jobs and queues completed meshes; takes no inputs and outputs no return value.
     while (chunkWorkerRunning.load(std::memory_order_relaxed)) {
         ChunkCoord coord{};
         bool hasJob = false;
@@ -635,6 +642,7 @@ void VulkanApp::runChunkMeshWorker() {
 }
 
 void VulkanApp::uploadCompletedChunkMeshes() {
+    // Uploads completed CPU chunk meshes to GPU in batched transfers; takes no inputs and outputs no return value.
     std::vector<std::pair<ChunkCoord, GpuChunkMesh>> readyGpuMeshes;
     std::vector<UploadStagingBuffers> uploadStaging;
     readyGpuMeshes.reserve(kChunkUploadsPerFrame);
@@ -791,6 +799,7 @@ void VulkanApp::uploadCompletedChunkMeshes() {
 }
 
 void RenderLoop(VulkanApp& app, GLFWwindow* window) {
+    // Runs the main render/event loop until window closes; inputs app/window and returns no value.
     constexpr double targetFrameTime = 1.0 / 60.0; // basic 60 FPS cap
 
     while (!glfwWindowShouldClose(window)) {

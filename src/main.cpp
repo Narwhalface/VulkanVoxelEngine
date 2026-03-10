@@ -10,6 +10,7 @@
 void setExecutableDirectory(const std::filesystem::path& path);
 
 GLFWwindow* InitialiseWindow() {
+    // Initializes GLFW and creates the Vulkan-compatible window; takes no inputs and returns window handle or nullptr.
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW\n";
         return nullptr;
@@ -30,6 +31,7 @@ GLFWwindow* InitialiseWindow() {
 }
 
 int main(int argc, char** argv) {
+    // Program entry point that initializes app, runs render loop, and handles shutdown; inputs argc/argv and returns exit code.
     if (argc > 0 && argv != nullptr && argv[0] != nullptr) {
         try {
             auto executableDir = std::filesystem::absolute(std::filesystem::path(argv[0])).parent_path();

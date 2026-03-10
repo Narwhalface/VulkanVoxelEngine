@@ -11,6 +11,7 @@ namespace {
     constexpr std::size_t kMaxCachedColumnHeights = 262144;
 
     int floorDiv(int value, int divisor) noexcept {
+        // Divides value by divisor with floor semantics for negative values; returns floored quotient.
         int quotient = value / divisor;
         const int remainder = value % divisor;
         if (remainder != 0 && ((remainder < 0) != (divisor < 0))) {
@@ -20,6 +21,7 @@ namespace {
     }
 
     int positiveModulo(int value, int divisor) noexcept {
+        // Computes modulo in [0, divisor) for possibly-negative value; returns positive remainder.
         int result = value % divisor;
         if (result < 0) {
             result += divisor;
@@ -29,10 +31,12 @@ namespace {
 }
 
 bool operator==(const ChunkCoord& lhs, const ChunkCoord& rhs) noexcept {
+    // Compares chunk coordinates component-wise; inputs lhs/rhs and returns true when equal.
     return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
 }
 
 std::size_t ChunkCoordHash::operator()(const ChunkCoord& coord) const noexcept {
+    // Hashes chunk coordinate components for unordered containers; input coord and output hash value.
     const std::size_t hx = std::hash<int32_t>{}(coord.x);
     const std::size_t hy = std::hash<int32_t>{}(coord.y);
     const std::size_t hz = std::hash<int32_t>{}(coord.z);
@@ -40,6 +44,7 @@ std::size_t ChunkCoordHash::operator()(const ChunkCoord& coord) const noexcept {
 }
 
 std::size_t Chunk::toIndex(int localX, int localY, int localZ) {
+    // Converts local voxel coordinates to linear array index; inputs localX/Y/Z and returns voxel index.
     assert(localX >= 0 && localX < SIZE);
     assert(localY >= 0 && localY < SIZE);
     assert(localZ >= 0 && localZ < SIZE);
@@ -47,24 +52,29 @@ std::size_t Chunk::toIndex(int localX, int localY, int localZ) {
 }
 
 Voxel& Chunk::at(int localX, int localY, int localZ) {
+    // Returns mutable voxel reference at local coordinates; inputs localX/Y/Z and outputs Voxel reference.
     return voxels[toIndex(localX, localY, localZ)];
 }
 
 const Voxel& Chunk::at(int localX, int localY, int localZ) const {
+    // Returns const voxel reference at local coordinates; inputs localX/Y/Z and outputs const Voxel reference.
     return voxels[toIndex(localX, localY, localZ)];
 }
 
 void Chunk::set(int localX, int localY, int localZ, const Voxel& voxel) {
+    // Writes voxel value at local coordinates; inputs localX/Y/Z plus voxel and outputs no return value.
     voxels[toIndex(localX, localY, localZ)] = voxel;
 }
 
 void Chunk::fillType(uint8_t type) {
+    // Fills entire chunk with one voxel type value; input type and no return output.
     for (Voxel& voxel : voxels) {
         voxel.type = type;
     }
 }
 
 void Chunk::setColumnRangeType(int localX, int localZ, int startY, int endY, uint8_t type) {
+    // Fills a clamped Y range in one X/Z column with type; inputs column/range/type and returns nothing.
     if (startY > endY) {
         return;
     }
@@ -83,6 +93,7 @@ void Chunk::setColumnRangeType(int localX, int localZ, int startY, int endY, uin
 }
 
 void TerrainGenerator::configure(uint32_t seedValue, const TerrainSettings& settingsValue) {
+    // Enables and configures terrain generation from seed/settings inputs; outputs no return value.
     seed = seedValue;
     settings = settingsValue;
     enabled = true;
@@ -90,22 +101,27 @@ void TerrainGenerator::configure(uint32_t seedValue, const TerrainSettings& sett
 }
 
 void TerrainGenerator::disable() noexcept {
+    // Disables terrain generation; takes no inputs and returns no value.
     enabled = false;
 }
 
 bool TerrainGenerator::isEnabled() const noexcept {
+    // Reports whether terrain generation is enabled; takes no inputs and returns bool.
     return enabled;
 }
 
 uint32_t TerrainGenerator::getSeed() const noexcept {
+    // Returns current terrain seed; takes no inputs.
     return seed;
 }
 
 TerrainSettings TerrainGenerator::getSettings() const noexcept {
+    // Returns current terrain settings copy; takes no inputs.
     return settings;
 }
 
 void TerrainGenerator::populateChunk(const ChunkCoord& coord, Chunk& chunk) const {
+    // Populates a chunk with terrain voxels for coord; inputs coord/chunk and outputs no return value.
     if (!enabled) {
         return;
     }
@@ -155,6 +171,7 @@ void TerrainGenerator::populateChunk(const ChunkCoord& coord, Chunk& chunk) cons
 }
 
 float TerrainGenerator::fractalNoise(float x, float z) const {
+    // Computes octave-based normalized noise from x/z sample inputs; returns noise value in [-1, 1].
     float amplitude = 1.0f;
     float frequency = 1.0f;
     float sum = 0.0f;
@@ -176,6 +193,7 @@ float TerrainGenerator::fractalNoise(float x, float z) const {
 }
 
 float TerrainGenerator::valueNoise(float x, float z) const {
+    // Computes smooth value noise at x/z sample inputs; returns interpolated noise value.
     const int x0 = static_cast<int>(std::floor(x));
     const int z0 = static_cast<int>(std::floor(z));
     const int x1 = x0 + 1;
@@ -202,6 +220,7 @@ float TerrainGenerator::valueNoise(float x, float z) const {
 }
 
 float TerrainGenerator::randomValue(int x, int z) const {
+    // Produces deterministic pseudo-random scalar from x/z and seed inputs; returns value in [0, 1].
     uint64_t h = static_cast<uint64_t>(static_cast<uint32_t>(x)) * 0x9e3779b185ebca87ULL;
     h ^= static_cast<uint64_t>(static_cast<uint32_t>(z)) * 0xc2b2ae3d27d4eb4fULL;
     h ^= static_cast<uint64_t>(seed) * 0x165667b19e3779f9ULL;
@@ -216,6 +235,7 @@ float TerrainGenerator::randomValue(int x, int z) const {
 }
 
 int TerrainGenerator::sampleColumnHeight(int worldX, int worldZ) const {
+    // Samples cached/procedural terrain column height for worldX/worldZ inputs; returns max solid world Y.
     const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(worldX)) << 32)
         | static_cast<uint64_t>(static_cast<uint32_t>(worldZ));
 
@@ -245,27 +265,33 @@ int TerrainGenerator::sampleColumnHeight(int worldX, int worldZ) const {
 }
 
 void TerrainGenerator::clearHeightCache() {
+    // Clears cached terrain column heights; takes no inputs and returns no value.
     std::unique_lock<std::shared_mutex> writeLock(cacheMutex);
     cachedColumnHeights.clear();
 }
 
 World::World(uint32_t terrainSeed) {
+    // Constructs world and initializes terrain generator from terrainSeed input; returns World instance.
     setTerrainGenerator(terrainSeed);
 }
 
 void World::setTerrainGenerator(uint32_t terrainSeed, const TerrainSettings& settings) {
+    // Configures terrain generator with seed/settings inputs; outputs no return value.
     terrainGenerator.configure(terrainSeed, settings);
 }
 
 void World::disableTerrainGenerator() noexcept {
+    // Disables terrain generation for this world; takes no inputs and returns no value.
     terrainGenerator.disable();
 }
 
 ChunkCoord World::worldToChunk(int worldX, int worldY, int worldZ) const {
+    // Converts world coordinates to owning chunk coordinate; inputs worldX/Y/Z and returns ChunkCoord.
     return {floorDiv(worldX, chunkSize), floorDiv(worldY, chunkSize), floorDiv(worldZ, chunkSize)};
 }
 
 Chunk& World::getOrCreateChunk(const ChunkCoord& coord) {
+    // Returns existing chunk or creates/populates one at coord input; outputs mutable Chunk reference.
     auto [it, inserted] = chunks.try_emplace(coord);
     if (inserted) {
         terrainGenerator.populateChunk(coord, it->second);
@@ -274,6 +300,7 @@ Chunk& World::getOrCreateChunk(const ChunkCoord& coord) {
 }
 
 const Chunk* World::findChunk(const ChunkCoord& coord) const {
+    // Finds chunk by coord input; returns chunk pointer or nullptr if missing.
     const auto it = chunks.find(coord);
     if (it == chunks.end()) {
         return nullptr;
@@ -282,10 +309,12 @@ const Chunk* World::findChunk(const ChunkCoord& coord) const {
 }
 
 bool World::hasChunk(const ChunkCoord& coord) const {
+    // Checks whether a chunk exists at coord input; returns true when present.
     return chunks.find(coord) != chunks.end();
 }
 
 Voxel& World::setVoxel(int worldX, int worldY, int worldZ, const Voxel& voxel) {
+    // Writes voxel at world coordinates worldX/Y/Z; inputs voxel and returns mutable stored voxel reference.
     const ChunkCoord chunkCoord = worldToChunk(worldX, worldY, worldZ);
     Chunk& chunk = getOrCreateChunk(chunkCoord);
     const int localX = positiveModulo(worldX, chunkSize);
@@ -296,6 +325,7 @@ Voxel& World::setVoxel(int worldX, int worldY, int worldZ, const Voxel& voxel) {
 }
 
 std::optional<Voxel> World::getVoxel(int worldX, int worldY, int worldZ) const {
+    // Reads voxel at world coordinates worldX/Y/Z; returns optional voxel if chunk exists.
     const ChunkCoord chunkCoord = worldToChunk(worldX, worldY, worldZ);
     const auto it = chunks.find(chunkCoord);
     if (it == chunks.end()) {
@@ -308,14 +338,17 @@ std::optional<Voxel> World::getVoxel(int worldX, int worldY, int worldZ) const {
 }
 
 void World::updateTerrainSettings(const TerrainSettings& settings) {
+    // Updates terrain settings while preserving current seed; input settings and no return output.
     terrainGenerator.configure(terrainGenerator.getSeed(), settings);
 }
 
 TerrainSettings World::getTerrainSettings() const noexcept {
+    // Returns current world terrain settings; takes no inputs.
     return terrainGenerator.getSettings();
 }
 
 void World::regenerateChunk(const ChunkCoord& coord) {
+    // Regenerates terrain data for one chunk at coord input; outputs no return value.
     auto it = chunks.find(coord);
     if (it != chunks.end()) {
         terrainGenerator.populateChunk(coord, it->second);
@@ -323,12 +356,14 @@ void World::regenerateChunk(const ChunkCoord& coord) {
 }
 
 void World::regenerateAllChunks() {
+    // Regenerates terrain data for every loaded chunk; takes no inputs and returns no value.
     for (auto& [coord, chunk] : chunks) {
         terrainGenerator.populateChunk(coord, chunk);
     }
 }
 
 void World::retainChunks(const std::unordered_set<ChunkCoord, ChunkCoordHash>& keepSet) {
+    // Removes chunks not present in keepSet input; outputs no return value.
     for (auto it = chunks.begin(); it != chunks.end();) {
         if (keepSet.find(it->first) == keepSet.end()) {
             it = chunks.erase(it);
@@ -339,5 +374,6 @@ void World::retainChunks(const std::unordered_set<ChunkCoord, ChunkCoordHash>& k
 }
 
 void World::clearAllChunks() {
+    // Clears all loaded chunks from the world; takes no inputs and returns no value.
     chunks.clear();
 }

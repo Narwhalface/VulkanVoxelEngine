@@ -24,6 +24,7 @@ public:
     };
 
     static ScriptValues loadScript(const std::filesystem::path& scriptPath) {
+        // Loads terrain settings from a Lua script path; input is scriptPath and output is parsed ScriptValues + error text.
         ScriptValues scriptValues;
 
         if (!std::filesystem::exists(scriptPath)) {
@@ -146,6 +147,7 @@ private:
     static std::string readLuaError(lua_State* luaState,
                                     const char* (__cdecl* luaToLString)(lua_State*, int, size_t*),
                                     void (__cdecl* luaSetTop)(lua_State*, int)) {
+        // Reads top-of-stack Lua error text using provided Lua API callbacks; returns a normalized error string.
         size_t messageLength = 0;
         const char* rawMessage = luaToLString(luaState, -1, &messageLength);
         std::string message = "Unknown Lua error.";
@@ -157,6 +159,7 @@ private:
     }
 
     static HMODULE loadLuaModule() {
+        // Tries known Lua DLL names in order and returns loaded module handle or nullptr.
         constexpr const char* moduleCandidates[] = {
             "lua54.dll",
             "lua53.dll",
@@ -187,6 +190,7 @@ public:
     };
 
     static ScriptValues loadScript(const std::filesystem::path&) {
+        // Non-Windows fallback loader that returns empty ScriptValues; takes script path and returns defaults.
         return {};
     }
 };

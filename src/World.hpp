@@ -12,6 +12,7 @@
 
 struct Voxel {
     uint8_t type = 0;
+    // Returns whether this voxel is non-empty/solid; takes no inputs.
     bool isSolid() const noexcept { return type != 0; }
 };
 
