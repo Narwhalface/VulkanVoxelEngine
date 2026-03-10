@@ -9,14 +9,35 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 #include <fstream>
+#include <chrono>
+#include <mutex>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <array>
 
+#ifdef max
+#undef max
+#endif
+
+#ifdef min
+#undef min
+#endif
+
 namespace {
 std::filesystem::path gExecutableDir;
+constexpr int kChunkSize = Chunk::SIZE;
+
+int floorDiv(int value, int divisor) noexcept {
+    int quotient = value / divisor;
+    const int remainder = value % divisor;
+    if (remainder != 0 && ((remainder < 0) != (divisor < 0))) {
+        --quotient;
+    }
+    return quotient;
+}
 
 struct FaceDefinition {
     glm::ivec3 normal;
@@ -171,31 +192,80 @@ void VulkanApp::initialize() {
     terrainSettings.lacunarity = 2.0f;
     terrainSettings.waterLevel = 10;
     world.setTerrainGenerator(1337u, terrainSettings);
-    buildVoxelMesh();
-    createVertexBuffer();
-    createIndexBuffer();
+
+    const float initialHeight = terrainSettings.baseHeight + terrainSettings.elevationAmplitude + 8.0f;
+    camera.setPosition(glm::vec3(0.5f, initialHeight, 0.5f));
+    camera.lookAt(glm::vec3(8.0f, initialHeight, 8.0f));
+
+    requestedTerrainCenterChunk = chunkForPosition(camera.position());
+    loadedTerrainCenterChunk = requestedTerrainCenterChunk;
+    pendingTerrainCenterChunk = requestedTerrainCenterChunk;
+
+    chunkWorkerRunning.store(true, std::memory_order_relaxed);
+    const uint32_t hardwareThreads = (std::max)(1u, std::thread::hardware_concurrency());
+    const uint32_t generationWorkerCount = (std::clamp)(hardwareThreads / 2, 2u, 8u);
+    const uint32_t meshWorkerCount = (std::clamp)(hardwareThreads - generationWorkerCount, 2u, 8u);
+    generationWorkerThreads.reserve(generationWorkerCount);
+    meshWorkerThreads.reserve(meshWorkerCount);
+    for (uint32_t workerIndex = 0; workerIndex < generationWorkerCount; ++workerIndex) {
+        generationWorkerThreads.emplace_back([this]() {
+            this->runChunkGenerationWorker();
+        });
+    }
+    for (uint32_t workerIndex = 0; workerIndex < meshWorkerCount; ++workerIndex) {
+        meshWorkerThreads.emplace_back([this]() {
+            this->runChunkMeshWorker();
+        });
+    }
+    requestTerrainWindow(requestedTerrainCenterChunk);
+    
     createUniformBuffers();
     createDescriptorPool();
     createDescriptorSets();
     createCommandBuffers();
     createSyncObjects();
 
-    const float radius = std::max(meshRadius * 1.8f, 30.0f);
-    const glm::vec3 initialPosition = meshCenter + glm::vec3(radius, radius * 0.75f, radius);
-    camera.setPosition(initialPosition);
-    camera.lookAt(meshCenter);
-
     const float aspect = swapchainExtent.height == 0
                              ? 1.0f
                              : swapchainExtent.width / static_cast<float>(swapchainExtent.height);
-    camera.setPerspective(45.0f, aspect, 0.1f, radius * 4.0f);
+    camera.setPerspective(45.0f, aspect, 0.1f, 500.0f);
 
     inputController.attach(windowRef, &camera);
     inputController.syncOrientationFromCamera();
     lastFrameTimeSeconds = glfwGetTime();
+
+    // Create terrain control window
+    terrainControlWindow = std::make_unique<TerrainControlWindow>(renderDistanceChunks.load(std::memory_order_relaxed));
+    terrainControlWindow->setRenderDistanceCallback([this](int newRenderDistance) {
+        const int clampedDistance = (std::max)(2, (std::min)(16, newRenderDistance));
+        this->renderDistanceChunks.store(clampedDistance, std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> lock(this->chunkQueueMutex);
+            this->requestedTerrainCenterChunk = this->chunkForPosition(this->camera.position());
+        }
+        this->meshNeedsRebuild.store(true, std::memory_order_relaxed);
+    });
 }
 
 void VulkanApp::cleanup() {
+    chunkWorkerRunning.store(false, std::memory_order_relaxed);
+    generationQueueCv.notify_all();
+    meshQueueCv.notify_all();
+
+    for (auto& worker : generationWorkerThreads) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+    generationWorkerThreads.clear();
+
+    for (auto& worker : meshWorkerThreads) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+    meshWorkerThreads.clear();
+    
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
 
@@ -210,6 +280,8 @@ void VulkanApp::cleanup() {
             vkDestroyDescriptorPool(device, descriptorPool, nullptr);
             descriptorPool = VK_NULL_HANDLE;
         }
+
+        clearAllChunkMeshes();
 
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
@@ -269,8 +341,6 @@ void VulkanApp::cleanup() {
         instance = VK_NULL_HANDLE;
     }
 
-    glfwDestroyWindow(windowRef);
-    glfwTerminate();
 }
 
 void VulkanApp::createInstance() {
@@ -1023,48 +1093,115 @@ VkImageView VulkanApp::createImageView(VkImage image, VkFormat format, VkImageAs
 
 void VulkanApp::buildVoxelMesh() {
     constexpr int chunkSize = Chunk::SIZE;
-    const int chunkRadiusXZ = 1;
-    const int minChunkY = -1;
-    const int maxChunkY = 2;
+    const int chunkRadius = renderDistanceChunks.load(std::memory_order_relaxed);
+    const ChunkCoord centerChunk = requestedTerrainCenterChunk;
 
     voxelVertices.clear();
     voxelIndices.clear();
 
-    glm::vec3 minCorner(std::numeric_limits<float>::max());
+    // Pre-load all chunks on main thread (thread-safe initialization)
+    auto startLoadTime = std::chrono::high_resolution_clock::now();
+    
+    std::vector<ChunkCoord> chunkCoords;
+    for (int cz = -chunkRadius; cz <= chunkRadius; ++cz) {
+        for (int cx = -chunkRadius; cx <= chunkRadius; ++cx) {
+            for (int cy = -chunkRadius; cy <= chunkRadius; ++cy) {
+                ChunkCoord coord{centerChunk.x + cx, centerChunk.y + cy, centerChunk.z + cz};
+                world.getOrCreateChunk(coord);  // Pre-load on main thread
+                chunkCoords.push_back(coord);
+            }
+        }
+    }
+
+    auto endLoadTime = std::chrono::high_resolution_clock::now();
+    auto loadDuration = std::chrono::duration_cast<std::chrono::milliseconds>(endLoadTime - startLoadTime).count();
+
+    // Pre-reserve space to reduce allocations
+    const int totalChunks = chunkCoords.size();
+    const int estimatedVerticesPerChunk = 24 * 16 * 16;  // Heuristic based on avg exposed faces
+    voxelVertices.reserve(totalChunks * estimatedVerticesPerChunk);
+    voxelIndices.reserve(totalChunks * estimatedVerticesPerChunk * 2);
+
+    glm::vec3 minCorner((std::numeric_limits<float>::max)());
     glm::vec3 maxCorner(std::numeric_limits<float>::lowest());
 
-    const auto updateBounds = [&](const glm::vec3& position) {
-        minCorner = glm::min(minCorner, position);
-        maxCorner = glm::max(maxCorner, position);
-    };
+    // Build mesh for each chunk (now thread-safe - chunks are pre-loaded)
+    // Cap to 4 threads to reduce CPU spike while maintaining good parallelism
+    const size_t numThreads = std::min(4U, std::max(1U, std::thread::hardware_concurrency()));
+    const size_t chunksPerThread = (chunkCoords.size() + numThreads - 1) / numThreads;
 
-    const auto neighborIsSolid = [&](const Chunk& chunk, int localX, int localY, int localZ, const glm::ivec3& normal, int worldX, int worldY, int worldZ) {
-        const int nx = localX + normal.x;
-        const int ny = localY + normal.y;
-        const int nz = localZ + normal.z;
+    auto startMeshTime = std::chrono::high_resolution_clock::now();
 
-        if (nx >= 0 && nx < chunkSize && ny >= 0 && ny < chunkSize && nz >= 0 && nz < chunkSize) {
-            return chunk.at(nx, ny, nz).isSolid();
-        }
+    std::vector<std::pair<std::vector<Vertex>, std::vector<uint32_t>>> threadMeshes(numThreads);
+    std::vector<std::pair<glm::vec3, glm::vec3>> threadBounds(numThreads, {
+        glm::vec3((std::numeric_limits<float>::max)()),
+        glm::vec3(std::numeric_limits<float>::lowest())
+    });
 
-        const auto neighbor = world.getVoxel(worldX + normal.x, worldY + normal.y, worldZ + normal.z);
-        return neighbor.has_value() && neighbor->isSolid();
-    };
+    std::vector<std::thread> threads;
+    for (size_t t = 0; t < numThreads; ++t) {
+        threads.emplace_back([&, t]() {
+            size_t startIdx = t * chunksPerThread;
+            size_t endIdx = std::min(startIdx + chunksPerThread, chunkCoords.size());
+            
+            auto& threadVertices = threadMeshes[t].first;
+            auto& threadIndices = threadMeshes[t].second;
+            threadVertices.reserve(estimatedVerticesPerChunk * chunksPerThread);
+            threadIndices.reserve(estimatedVerticesPerChunk * 2 * chunksPerThread);
 
-    // Generate a naive face-per-voxel mesh for a small chunk region.
-    for (int cz = -chunkRadiusXZ; cz <= chunkRadiusXZ; ++cz) {
-        for (int cx = -chunkRadiusXZ; cx <= chunkRadiusXZ; ++cx) {
-            for (int cy = minChunkY; cy <= maxChunkY; ++cy) {
-                const ChunkCoord coord{cx, cy, cz};
-                Chunk& chunk = world.getOrCreateChunk(coord);
+            for (size_t i = startIdx; i < endIdx; ++i) {
+                const ChunkCoord coord = chunkCoords[i];
+                const Chunk* chunk = world.findChunk(coord);
+                if (!chunk) continue;
+
+                const Chunk* neighborXN = world.findChunk({coord.x - 1, coord.y, coord.z});
+                const Chunk* neighborXP = world.findChunk({coord.x + 1, coord.y, coord.z});
+                const Chunk* neighborYN = world.findChunk({coord.x, coord.y - 1, coord.z});
+                const Chunk* neighborYP = world.findChunk({coord.x, coord.y + 1, coord.z});
+                const Chunk* neighborZN = world.findChunk({coord.x, coord.y, coord.z - 1});
+                const Chunk* neighborZP = world.findChunk({coord.x, coord.y, coord.z + 1});
+
                 const int baseX = coord.x * chunkSize;
                 const int baseY = coord.y * chunkSize;
                 const int baseZ = coord.z * chunkSize;
 
+                const auto isNeighborSolid = [&](int nx, int ny, int nz) {
+                    if (nx >= 0 && nx < chunkSize && ny >= 0 && ny < chunkSize && nz >= 0 && nz < chunkSize) {
+                        return chunk->at(nx, ny, nz).isSolid();
+                    }
+
+                    const Chunk* neighborChunk = nullptr;
+                    int sampleX = nx;
+                    int sampleY = ny;
+                    int sampleZ = nz;
+
+                    if (nx < 0) {
+                        neighborChunk = neighborXN;
+                        sampleX += chunkSize;
+                    } else if (nx >= chunkSize) {
+                        neighborChunk = neighborXP;
+                        sampleX -= chunkSize;
+                    } else if (ny < 0) {
+                        neighborChunk = neighborYN;
+                        sampleY += chunkSize;
+                    } else if (ny >= chunkSize) {
+                        neighborChunk = neighborYP;
+                        sampleY -= chunkSize;
+                    } else if (nz < 0) {
+                        neighborChunk = neighborZN;
+                        sampleZ += chunkSize;
+                    } else {
+                        neighborChunk = neighborZP;
+                        sampleZ -= chunkSize;
+                    }
+
+                    return neighborChunk != nullptr && neighborChunk->at(sampleX, sampleY, sampleZ).isSolid();
+                };
+
                 for (int localZ = 0; localZ < chunkSize; ++localZ) {
                     for (int localY = 0; localY < chunkSize; ++localY) {
                         for (int localX = 0; localX < chunkSize; ++localX) {
-                            const Voxel& voxel = chunk.at(localX, localY, localZ);
+                            const Voxel& voxel = chunk->at(localX, localY, localZ);
                             if (!voxel.isSolid()) {
                                 continue;
                             }
@@ -1075,33 +1212,62 @@ void VulkanApp::buildVoxelMesh() {
                             const glm::vec3 basePosition(static_cast<float>(worldX), static_cast<float>(worldY), static_cast<float>(worldZ));
 
                             for (const auto& face : gFaceDefinitions) {
-                                if (neighborIsSolid(chunk, localX, localY, localZ, face.normal, worldX, worldY, worldZ)) {
+                                const int nx = localX + face.normal.x;
+                                const int ny = localY + face.normal.y;
+                                const int nz = localZ + face.normal.z;
+                                if (isNeighborSolid(nx, ny, nz)) {
                                     continue;
                                 }
 
                                 const glm::vec3 baseColour = voxelBaseColor(voxel.type, face.normal);
                                 const float shade = shadeForNormal(face.normal);
                                 const glm::vec3 colour = glm::clamp(baseColour * shade, glm::vec3(0.0f), glm::vec3(1.0f));
-                                const uint32_t startIndex = static_cast<uint32_t>(voxelVertices.size());
+                                const uint32_t startIndex = static_cast<uint32_t>(threadVertices.size());
 
                                 for (const auto& corner : face.corners) {
                                     const glm::vec3 position = basePosition + corner;
-                                    voxelVertices.push_back(Vertex{position, colour});
-                                    updateBounds(position);
+                                    threadVertices.push_back(Vertex{position, colour});
+                                    threadBounds[t].first = (glm::min)(threadBounds[t].first, position);
+                                    threadBounds[t].second = (glm::max)(threadBounds[t].second, position);
                                 }
 
-                                voxelIndices.push_back(startIndex);
-                                voxelIndices.push_back(startIndex + 1);
-                                voxelIndices.push_back(startIndex + 2);
-                                voxelIndices.push_back(startIndex);
-                                voxelIndices.push_back(startIndex + 2);
-                                voxelIndices.push_back(startIndex + 3);
+                                threadIndices.push_back(startIndex);
+                                threadIndices.push_back(startIndex + 1);
+                                threadIndices.push_back(startIndex + 2);
+                                threadIndices.push_back(startIndex);
+                                threadIndices.push_back(startIndex + 2);
+                                threadIndices.push_back(startIndex + 3);
                             }
                         }
                     }
                 }
             }
+        });
+    }
+
+    // Wait for all threads to complete
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    auto endMeshTime = std::chrono::high_resolution_clock::now();
+    auto meshDuration = std::chrono::duration_cast<std::chrono::milliseconds>(endMeshTime - startMeshTime).count();
+
+    // Merge all thread meshes
+    uint32_t vertexOffset = 0;
+    for (size_t t = 0; t < numThreads; ++t) {
+        const auto& threadVerts = threadMeshes[t].first;
+        const auto& threadInds = threadMeshes[t].second;
+
+        voxelVertices.insert(voxelVertices.end(), threadVerts.begin(), threadVerts.end());
+        
+        for (uint32_t idx : threadInds) {
+            voxelIndices.push_back(idx + vertexOffset);
         }
+
+        vertexOffset += static_cast<uint32_t>(threadVerts.size());
+        minCorner = (glm::min)(minCorner, threadBounds[t].first);
+        maxCorner = (glm::max)(maxCorner, threadBounds[t].second);
     }
 
     if (!voxelVertices.empty()) {
@@ -1112,11 +1278,14 @@ void VulkanApp::buildVoxelMesh() {
         meshCenter = glm::vec3(0.0f);
         meshRadius = 1.0f;
     }
+
+    std::cout << "Terrain generation timing: " << loadDuration << "ms (load chunks) + " << meshDuration << "ms (parallel mesh build)\n";
 }
 
 void VulkanApp::createVertexBuffer() {
     if (voxelVertices.empty()) {
-        throw std::runtime_error("Voxel vertex buffer is empty");
+        std::cerr << "Warning: Creating vertex buffer with no vertices\n";
+        return;
     }
 
     VkDeviceSize bufferSize = sizeof(Vertex) * voxelVertices.size();
@@ -1139,7 +1308,8 @@ void VulkanApp::createVertexBuffer() {
 
 void VulkanApp::createIndexBuffer() {
     if (voxelIndices.empty()) {
-        throw std::runtime_error("Voxel index buffer is empty");
+        std::cerr << "Warning: Creating index buffer with no indices\n";
+        return;
     }
 
     VkDeviceSize bufferSize = sizeof(uint32_t) * voxelIndices.size();
@@ -1200,8 +1370,23 @@ void VulkanApp::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize 
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(graphicsQueue);
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
+    VkFence transferFence = VK_NULL_HANDLE;
+    if (vkCreateFence(device, &fenceInfo, nullptr, &transferFence) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+        throw std::runtime_error("Failed to create transfer fence");
+    }
+
+    if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, transferFence) != VK_SUCCESS) {
+        vkDestroyFence(device, transferFence, nullptr);
+        vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+        throw std::runtime_error("Failed to submit transfer command buffer");
+    }
+
+    vkWaitForFences(device, 1, &transferFence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(device, transferFence, nullptr);
 
     vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
 }
@@ -1287,52 +1472,6 @@ void VulkanApp::createCommandBuffers() {
         throw std::runtime_error("Failed to allocate command buffer");
     } else {
         std::cout << "Command buffer allocated\n";
-    }
-}
-
-void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = 0;
-    beginInfo.pInheritanceInfo = nullptr;
-
-    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to begin recording command buffer");
-    }
-
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass        = renderPass;
-    renderPassInfo.framebuffer       = swapchainFramebuffers[imageIndex];
-    renderPassInfo.renderArea.offset = {0, 0};
-    renderPassInfo.renderArea.extent = swapchainExtent;
-
-    std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color        = {{0.0f, 0.0f, 0.0f, 1.0f}};
-    clearValues[1].depthStencil = {1.0f, 0};
-
-    renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    renderPassInfo.pClearValues    = clearValues.data();
-
-    vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-    VkBuffer vertexBuffers[] = {vertexBuffer};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-    if (!descriptorSets.empty()) {
-        const uint32_t activeFrame = currentFrame % static_cast<uint32_t>(descriptorSets.size());
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[activeFrame], 0, nullptr);
-    }
-
-    if (!voxelIndices.empty()) {
-        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(voxelIndices.size()), 1, 0, 0, 0);
-    }
-
-    vkCmdEndRenderPass(commandBuffer);
-    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to record command buffer");
     }
 }
 
@@ -1438,80 +1577,6 @@ void VulkanApp::recreateSwapChain() {
     createFramebuffers();
 }
 
-void VulkanApp::drawFrame(VulkanApp& app) {
-    const double currentTime = glfwGetTime();
-    double deltaSeconds = currentTime - lastFrameTimeSeconds;
-    lastFrameTimeSeconds = currentTime;
-    deltaSeconds = std::clamp(deltaSeconds, 0.0, 0.25);
-
-    if (app.swapchainExtent.width == 0 || app.swapchainExtent.height == 0) {
-        return;
-    }
-
-    inputController.update(deltaSeconds);
-
-    vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
-
-    uint32_t imageIndex;
-    VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
-
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
-        framebufferResized = false;
-        recreateSwapChain();
-        return;
-    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-        throw std::runtime_error("Failed to acquire swapchain image");
-    }
-
-    updateUniformBuffer(currentFrame);
-
-    vkResetFences(device, 1, &inFlightFences[currentFrame]);
-
-    vkResetCommandBuffer(app.commandBuffers[currentFrame], 0);
-    app.recordCommandBuffer(app.commandBuffers[currentFrame], imageIndex);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-
-    VkSemaphore waitSemaphores[] = {app.imageAvailableSemaphores[currentFrame]};
-    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores    = waitSemaphores;
-    submitInfo.pWaitDstStageMask  = waitStages;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers    = &app.commandBuffers[currentFrame];
-
-    VkSemaphore signalSemaphores[] = {app.renderFinishedSemaphores[currentFrame]};
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores    = signalSemaphores;
-
-    if (vkQueueSubmit(app.graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to submit draw command buffer");
-    }
-
-    VkPresentInfoKHR presentInfo{};
-    presentInfo.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores    = signalSemaphores;
-
-    VkSwapchainKHR swapchains[] = {app.swapchain};
-    presentInfo.swapchainCount  = 1;
-    presentInfo.pSwapchains     = swapchains;
-    presentInfo.pImageIndices   = &imageIndex;
-
-    presentInfo.pResults = nullptr;
-    result = vkQueuePresentKHR(app.presentQueue, &presentInfo);
-
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
-        framebufferResized = false;
-        recreateSwapChain();
-    } else if (result != VK_SUCCESS) {
-        throw std::runtime_error("Failed to present swapchain image");
-    }
-
-    currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
-}
-
 void VulkanApp::updateUniformBuffer(uint32_t currentImage) {
     UniformBufferObject ubo{};
     ubo.model = glm::mat4(1.0f);
@@ -1521,8 +1586,13 @@ void VulkanApp::updateUniformBuffer(uint32_t currentImage) {
                              : swapchainExtent.width / static_cast<float>(swapchainExtent.height);
     const float radius = std::max(meshRadius * 1.8f, 30.0f);
     const float distanceToCenter = glm::length(camera.position() - meshCenter);
-    const float farPlane = std::max(distanceToCenter + radius * 2.0f, radius * 4.0f);
-    camera.setPerspective(45.0f, aspect, 0.1f, std::max(farPlane, 500.0f));
+    const int activeRenderDistance = renderDistanceChunks.load(std::memory_order_relaxed);
+    const float chunkExtent = static_cast<float>((activeRenderDistance + kKeepRadiusExtra + 2) * kChunkSize);
+    const float ringDiagonal = chunkExtent * 1.45f;
+    const float farPlaneFromDistance = distanceToCenter + ringDiagonal + 96.0f;
+    const float farPlaneFromBounds = std::max(distanceToCenter + radius * 2.5f, radius * 5.0f);
+    const float farPlane = std::max(farPlaneFromBounds, farPlaneFromDistance);
+    camera.setPerspective(45.0f, aspect, 1.5f, std::max(farPlane, 900.0f));
 
     ubo.view = camera.viewMatrix();
     ubo.proj = camera.projectionMatrix();
@@ -1533,5 +1603,640 @@ void VulkanApp::updateUniformBuffer(uint32_t currentImage) {
 void VulkanApp::waitIdle() const {
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
+    }
+}
+void VulkanApp::rebuildVoxelMesh() {
+    requestTerrainWindow(requestedTerrainCenterChunk);
+}
+
+void VulkanApp::buildVoxelMeshAsync() {
+    // Background thread function - builds mesh without blocking main thread
+    constexpr int chunkSize = Chunk::SIZE;
+    const int chunkRadius = renderDistanceChunks.load(std::memory_order_relaxed);
+    const ChunkCoord centerChunk = requestedTerrainCenterChunk;
+
+    pendingVertices.clear();
+    pendingIndices.clear();
+    pendingTerrainCenterChunk = centerChunk;
+
+    // Pre-load all chunks on main thread (thread-safe initialization)
+    auto startLoadTime = std::chrono::high_resolution_clock::now();
+    
+    std::vector<ChunkCoord> chunkCoords;
+    for (int cz = -chunkRadius; cz <= chunkRadius; ++cz) {
+        for (int cx = -chunkRadius; cx <= chunkRadius; ++cx) {
+            for (int cy = -chunkRadius; cy <= chunkRadius; ++cy) {
+                ChunkCoord coord{centerChunk.x + cx, centerChunk.y + cy, centerChunk.z + cz};
+                world.getOrCreateChunk(coord);  // Pre-load on main thread
+                chunkCoords.push_back(coord);
+            }
+        }
+    }
+
+    auto endLoadTime = std::chrono::high_resolution_clock::now();
+    auto loadDuration = std::chrono::duration_cast<std::chrono::milliseconds>(endLoadTime - startLoadTime).count();
+
+    // Pre-reserve space to reduce allocations
+    const int totalChunks = chunkCoords.size();
+    totalChunksToLoad = totalChunks;
+    const int estimatedVerticesPerChunk = 24 * 16 * 16;  // Heuristic based on avg exposed faces
+    pendingVertices.reserve(totalChunks * estimatedVerticesPerChunk);
+    pendingIndices.reserve(totalChunks * estimatedVerticesPerChunk * 2);
+
+    glm::vec3 minCorner((std::numeric_limits<float>::max)());
+    glm::vec3 maxCorner(std::numeric_limits<float>::lowest());
+
+    // Build mesh for each chunk (now thread-safe - chunks are pre-loaded)
+    // Cap to 4 threads to reduce CPU spike while maintaining good parallelism
+    const size_t numThreads = std::min(4U, std::max(1U, std::thread::hardware_concurrency()));
+    const size_t chunksPerThread = (chunkCoords.size() + numThreads - 1) / numThreads;
+
+    auto startMeshTime = std::chrono::high_resolution_clock::now();
+
+    std::vector<std::pair<std::vector<Vertex>, std::vector<uint32_t>>> threadMeshes(numThreads);
+    std::vector<std::pair<glm::vec3, glm::vec3>> threadBounds(numThreads, {
+        glm::vec3((std::numeric_limits<float>::max)()),
+        glm::vec3(std::numeric_limits<float>::lowest())
+    });
+
+    std::vector<std::thread> threads;
+    for (size_t t = 0; t < numThreads; ++t) {
+        threads.emplace_back([&, t]() {
+            size_t startIdx = t * chunksPerThread;
+            size_t endIdx = std::min(startIdx + chunksPerThread, chunkCoords.size());
+            
+            auto& threadVertices = threadMeshes[t].first;
+            auto& threadIndices = threadMeshes[t].second;
+            threadVertices.reserve(estimatedVerticesPerChunk * chunksPerThread);
+            threadIndices.reserve(estimatedVerticesPerChunk * 2 * chunksPerThread);
+
+            for (size_t i = startIdx; i < endIdx; ++i) {
+                const ChunkCoord coord = chunkCoords[i];
+                const Chunk* chunk = world.findChunk(coord);
+                if (!chunk) continue;
+
+                const Chunk* neighborXN = world.findChunk({coord.x - 1, coord.y, coord.z});
+                const Chunk* neighborXP = world.findChunk({coord.x + 1, coord.y, coord.z});
+                const Chunk* neighborYN = world.findChunk({coord.x, coord.y - 1, coord.z});
+                const Chunk* neighborYP = world.findChunk({coord.x, coord.y + 1, coord.z});
+                const Chunk* neighborZN = world.findChunk({coord.x, coord.y, coord.z - 1});
+                const Chunk* neighborZP = world.findChunk({coord.x, coord.y, coord.z + 1});
+
+                const int baseX = coord.x * chunkSize;
+                const int baseY = coord.y * chunkSize;
+                const int baseZ = coord.z * chunkSize;
+
+                const auto isNeighborSolid = [&](int nx, int ny, int nz) {
+                    if (nx >= 0 && nx < chunkSize && ny >= 0 && ny < chunkSize && nz >= 0 && nz < chunkSize) {
+                        return chunk->at(nx, ny, nz).isSolid();
+                    }
+
+                    const Chunk* neighborChunk = nullptr;
+                    int sampleX = nx;
+                    int sampleY = ny;
+                    int sampleZ = nz;
+
+                    if (nx < 0) {
+                        neighborChunk = neighborXN;
+                        sampleX += chunkSize;
+                    } else if (nx >= chunkSize) {
+                        neighborChunk = neighborXP;
+                        sampleX -= chunkSize;
+                    } else if (ny < 0) {
+                        neighborChunk = neighborYN;
+                        sampleY += chunkSize;
+                    } else if (ny >= chunkSize) {
+                        neighborChunk = neighborYP;
+                        sampleY -= chunkSize;
+                    } else if (nz < 0) {
+                        neighborChunk = neighborZN;
+                        sampleZ += chunkSize;
+                    } else {
+                        neighborChunk = neighborZP;
+                        sampleZ -= chunkSize;
+                    }
+
+                    return neighborChunk != nullptr && neighborChunk->at(sampleX, sampleY, sampleZ).isSolid();
+                };
+
+                for (int localZ = 0; localZ < chunkSize; ++localZ) {
+                    for (int localY = 0; localY < chunkSize; ++localY) {
+                        for (int localX = 0; localX < chunkSize; ++localX) {
+                            const Voxel& voxel = chunk->at(localX, localY, localZ);
+                            if (!voxel.isSolid()) {
+                                continue;
+                            }
+
+                            const int worldX = baseX + localX;
+                            const int worldY = baseY + localY;
+                            const int worldZ = baseZ + localZ;
+                            const glm::vec3 basePosition(static_cast<float>(worldX), static_cast<float>(worldY), static_cast<float>(worldZ));
+
+                            for (const auto& face : gFaceDefinitions) {
+                                const int nx = localX + face.normal.x;
+                                const int ny = localY + face.normal.y;
+                                const int nz = localZ + face.normal.z;
+                                if (isNeighborSolid(nx, ny, nz)) {
+                                    continue;
+                                }
+
+                                const glm::vec3 baseColour = voxelBaseColor(voxel.type, face.normal);
+                                const float shade = shadeForNormal(face.normal);
+                                const glm::vec3 colour = glm::clamp(baseColour * shade, glm::vec3(0.0f), glm::vec3(1.0f));
+                                const uint32_t startIndex = static_cast<uint32_t>(threadVertices.size());
+
+                                for (const auto& corner : face.corners) {
+                                    const glm::vec3 position = basePosition + corner;
+                                    threadVertices.push_back(Vertex{position, colour});
+                                    threadBounds[t].first = (glm::min)(threadBounds[t].first, position);
+                                    threadBounds[t].second = (glm::max)(threadBounds[t].second, position);
+                                }
+
+                                threadIndices.push_back(startIndex);
+                                threadIndices.push_back(startIndex + 1);
+                                threadIndices.push_back(startIndex + 2);
+                                threadIndices.push_back(startIndex);
+                                threadIndices.push_back(startIndex + 2);
+                                threadIndices.push_back(startIndex + 3);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Wait for all threads to complete
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    auto endMeshTime = std::chrono::high_resolution_clock::now();
+    auto meshDuration = std::chrono::duration_cast<std::chrono::milliseconds>(endMeshTime - startMeshTime).count();
+
+    // Merge all thread meshes
+    uint32_t vertexOffset = 0;
+    for (size_t t = 0; t < numThreads; ++t) {
+        const auto& threadVerts = threadMeshes[t].first;
+        const auto& threadInds = threadMeshes[t].second;
+
+        pendingVertices.insert(pendingVertices.end(), threadVerts.begin(), threadVerts.end());
+        
+        for (uint32_t idx : threadInds) {
+            pendingIndices.push_back(idx + vertexOffset);
+        }
+
+        vertexOffset += static_cast<uint32_t>(threadVerts.size());
+        minCorner = (glm::min)(minCorner, threadBounds[t].first);
+        maxCorner = (glm::max)(maxCorner, threadBounds[t].second);
+    }
+
+    if (!pendingVertices.empty()) {
+        pendingMeshCenter = (minCorner + maxCorner) * 0.5f;
+        pendingMeshRadius = glm::length(maxCorner - pendingMeshCenter);
+        pendingMeshRadius = std::max(pendingMeshRadius, 1.0f);
+    } else {
+        pendingMeshCenter = glm::vec3(0.0f);
+        pendingMeshRadius = 1.0f;
+    }
+
+    std::cout << "Async mesh generation complete: " << loadDuration << "ms (load chunks) + " << meshDuration << "ms (parallel mesh build)\n";
+    meshBuildProgress.store(100, std::memory_order_relaxed);
+}
+
+void VulkanApp::uploadPendingMesh() {
+    // Main thread only - swap pending mesh with active and upload to GPU
+    {
+        std::lock_guard<std::mutex> lock(meshDataLock);
+        
+        voxelVertices = std::move(pendingVertices);
+        voxelIndices = std::move(pendingIndices);
+        meshCenter = pendingMeshCenter;
+        meshRadius = pendingMeshRadius;
+        loadedTerrainCenterChunk = pendingTerrainCenterChunk;
+        
+        pendingVertices.clear();
+        pendingIndices.clear();
+    }
+
+    // Destroy old buffers if they exist
+    if (vertexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device, vertexBuffer, nullptr);
+        vertexBuffer = VK_NULL_HANDLE;
+    }
+    if (vertexBufferMemory != VK_NULL_HANDLE) {
+        vkFreeMemory(device, vertexBufferMemory, nullptr);
+        vertexBufferMemory = VK_NULL_HANDLE;
+    }
+    if (indexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device, indexBuffer, nullptr);
+        indexBuffer = VK_NULL_HANDLE;
+    }
+    if (indexBufferMemory != VK_NULL_HANDLE) {
+        vkFreeMemory(device, indexBufferMemory, nullptr);
+        indexBufferMemory = VK_NULL_HANDLE;
+    }
+
+    // Create new buffers with loaded mesh data
+    createVertexBuffer();
+    createIndexBuffer();
+
+    std::cout << "Mesh uploaded to GPU: " << voxelVertices.size() << " vertices, " << voxelIndices.size() << " indices\n";
+}
+
+VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coord) {
+    PendingChunkMesh result{};
+    result.coord = coord;
+
+    Chunk chunkSnapshot{};
+    Chunk neighborXNNnapshot{};
+    Chunk neighborXPSnapshot{};
+    Chunk neighborYNSnapshot{};
+    Chunk neighborYPSnapshot{};
+    Chunk neighborZNSnapshot{};
+    Chunk neighborZPSnapshot{};
+    bool hasNeighborXN = false;
+    bool hasNeighborXP = false;
+    bool hasNeighborYN = false;
+    bool hasNeighborYP = false;
+    bool hasNeighborZN = false;
+    bool hasNeighborZP = false;
+
+    {
+        std::shared_lock<std::shared_mutex> worldLock(worldDataMutex);
+        const Chunk* chunk = world.findChunk(coord);
+        if (!chunk) {
+            return result;
+        }
+
+        chunkSnapshot = *chunk;
+
+        if (const Chunk* neighbor = world.findChunk({coord.x - 1, coord.y, coord.z}); neighbor != nullptr) {
+            neighborXNNnapshot = *neighbor;
+            hasNeighborXN = true;
+        }
+        if (const Chunk* neighbor = world.findChunk({coord.x + 1, coord.y, coord.z}); neighbor != nullptr) {
+            neighborXPSnapshot = *neighbor;
+            hasNeighborXP = true;
+        }
+        if (const Chunk* neighbor = world.findChunk({coord.x, coord.y - 1, coord.z}); neighbor != nullptr) {
+            neighborYNSnapshot = *neighbor;
+            hasNeighborYN = true;
+        }
+        if (const Chunk* neighbor = world.findChunk({coord.x, coord.y + 1, coord.z}); neighbor != nullptr) {
+            neighborYPSnapshot = *neighbor;
+            hasNeighborYP = true;
+        }
+        if (const Chunk* neighbor = world.findChunk({coord.x, coord.y, coord.z - 1}); neighbor != nullptr) {
+            neighborZNSnapshot = *neighbor;
+            hasNeighborZN = true;
+        }
+        if (const Chunk* neighbor = world.findChunk({coord.x, coord.y, coord.z + 1}); neighbor != nullptr) {
+            neighborZPSnapshot = *neighbor;
+            hasNeighborZP = true;
+        }
+    }
+
+    constexpr int chunkSize = Chunk::SIZE;
+    const int baseX = coord.x * chunkSize;
+    const int baseY = coord.y * chunkSize;
+    const int baseZ = coord.z * chunkSize;
+
+    result.minCorner = glm::vec3((std::numeric_limits<float>::max)());
+    result.maxCorner = glm::vec3(std::numeric_limits<float>::lowest());
+
+    result.vertices.reserve(24 * chunkSize * chunkSize);
+    result.indices.reserve(36 * chunkSize * chunkSize);
+
+    const auto isNeighborSolid = [&](int nx, int ny, int nz) {
+        if (nx >= 0 && nx < chunkSize && ny >= 0 && ny < chunkSize && nz >= 0 && nz < chunkSize) {
+            return chunkSnapshot.at(nx, ny, nz).isSolid();
+        }
+
+        const Chunk* neighborChunk = nullptr;
+        int sampleX = nx;
+        int sampleY = ny;
+        int sampleZ = nz;
+
+        if (nx < 0) {
+            neighborChunk = hasNeighborXN ? &neighborXNNnapshot : nullptr;
+            sampleX += chunkSize;
+        } else if (nx >= chunkSize) {
+            neighborChunk = hasNeighborXP ? &neighborXPSnapshot : nullptr;
+            sampleX -= chunkSize;
+        } else if (ny < 0) {
+            neighborChunk = hasNeighborYN ? &neighborYNSnapshot : nullptr;
+            sampleY += chunkSize;
+        } else if (ny >= chunkSize) {
+            neighborChunk = hasNeighborYP ? &neighborYPSnapshot : nullptr;
+            sampleY -= chunkSize;
+        } else if (nz < 0) {
+            neighborChunk = hasNeighborZN ? &neighborZNSnapshot : nullptr;
+            sampleZ += chunkSize;
+        } else {
+            neighborChunk = hasNeighborZP ? &neighborZPSnapshot : nullptr;
+            sampleZ -= chunkSize;
+        }
+
+        return neighborChunk != nullptr && neighborChunk->at(sampleX, sampleY, sampleZ).isSolid();
+    };
+
+    for (int localZ = 0; localZ < chunkSize; ++localZ) {
+        for (int localY = 0; localY < chunkSize; ++localY) {
+            for (int localX = 0; localX < chunkSize; ++localX) {
+                const Voxel& voxel = chunkSnapshot.at(localX, localY, localZ);
+                if (!voxel.isSolid()) {
+                    continue;
+                }
+
+                const int worldX = baseX + localX;
+                const int worldY = baseY + localY;
+                const int worldZ = baseZ + localZ;
+                const glm::vec3 basePosition(static_cast<float>(worldX), static_cast<float>(worldY), static_cast<float>(worldZ));
+
+                for (const auto& face : gFaceDefinitions) {
+                    const int nx = localX + face.normal.x;
+                    const int ny = localY + face.normal.y;
+                    const int nz = localZ + face.normal.z;
+                    if (isNeighborSolid(nx, ny, nz)) {
+                        continue;
+                    }
+
+                    const glm::vec3 baseColour = voxelBaseColor(voxel.type, face.normal);
+                    const float shade = shadeForNormal(face.normal);
+                    const glm::vec3 colour = glm::clamp(baseColour * shade, glm::vec3(0.0f), glm::vec3(1.0f));
+                    const uint32_t startIndex = static_cast<uint32_t>(result.vertices.size());
+
+                    for (const auto& corner : face.corners) {
+                        const glm::vec3 position = basePosition + corner;
+                        result.vertices.push_back(Vertex{position, colour});
+                        result.minCorner = (glm::min)(result.minCorner, position);
+                        result.maxCorner = (glm::max)(result.maxCorner, position);
+                    }
+
+                    result.indices.push_back(startIndex);
+                    result.indices.push_back(startIndex + 1);
+                    result.indices.push_back(startIndex + 2);
+                    result.indices.push_back(startIndex);
+                    result.indices.push_back(startIndex + 2);
+                    result.indices.push_back(startIndex + 3);
+                }
+            }
+        }
+    }
+
+    result.hasGeometry = !result.indices.empty();
+    if (!result.hasGeometry) {
+        result.minCorner = glm::vec3(0.0f);
+        result.maxCorner = glm::vec3(0.0f);
+    }
+
+    return result;
+}
+
+void VulkanApp::destroyChunkMeshResources(GpuChunkMesh& mesh) {
+    if (mesh.vertexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device, mesh.vertexBuffer, nullptr);
+        mesh.vertexBuffer = VK_NULL_HANDLE;
+    }
+    if (mesh.vertexBufferMemory != VK_NULL_HANDLE) {
+        vkFreeMemory(device, mesh.vertexBufferMemory, nullptr);
+        mesh.vertexBufferMemory = VK_NULL_HANDLE;
+    }
+    if (mesh.indexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device, mesh.indexBuffer, nullptr);
+        mesh.indexBuffer = VK_NULL_HANDLE;
+    }
+    if (mesh.indexBufferMemory != VK_NULL_HANDLE) {
+        vkFreeMemory(device, mesh.indexBufferMemory, nullptr);
+        mesh.indexBufferMemory = VK_NULL_HANDLE;
+    }
+    mesh.indexCount = 0;
+}
+
+bool VulkanApp::isChunkVisible(const GpuChunkMesh& mesh, const std::array<glm::vec4, 6>& frustumPlanes, float maxVisibleDistance, const glm::vec3& cameraPos) const {
+    const glm::vec3 chunkCenter = (mesh.minCorner + mesh.maxCorner) * 0.5f;
+    const float chunkRadius = glm::length(mesh.maxCorner - chunkCenter);
+    const glm::vec3 toChunk = chunkCenter - cameraPos;
+    const float distanceSq = glm::dot(toChunk, toChunk);
+    const float maxDistanceWithRadius = maxVisibleDistance + chunkRadius;
+    if (distanceSq > maxDistanceWithRadius * maxDistanceWithRadius) {
+        return false;
+    }
+
+    for (const glm::vec4& plane : frustumPlanes) {
+        const glm::vec3 normal(plane.x, plane.y, plane.z);
+        const glm::vec3 positiveVertex(
+            normal.x >= 0.0f ? mesh.maxCorner.x : mesh.minCorner.x,
+            normal.y >= 0.0f ? mesh.maxCorner.y : mesh.minCorner.y,
+            normal.z >= 0.0f ? mesh.maxCorner.z : mesh.minCorner.z
+        );
+        if (glm::dot(normal, positiveVertex) + plane.w < 0.0f) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void VulkanApp::enqueueChunkMeshForDestruction(GpuChunkMesh&& mesh) {
+    if (mesh.vertexBuffer == VK_NULL_HANDLE && mesh.indexBuffer == VK_NULL_HANDLE) {
+        return;
+    }
+
+    DeferredDestroyEntry entry{};
+    entry.mesh = std::move(mesh);
+    entry.retireAfterCompletedSubmission = completedSubmissionCount + static_cast<uint64_t>(MAX_FRAMES_IN_FLIGHT) + 1;
+    deferredDestroyQueue.push_back(std::move(entry));
+}
+
+void VulkanApp::processDeferredDestroyQueue() {
+    while (!deferredDestroyQueue.empty()) {
+        DeferredDestroyEntry& entry = deferredDestroyQueue.front();
+        if (entry.retireAfterCompletedSubmission > completedSubmissionCount) {
+            break;
+        }
+        destroyChunkMeshResources(entry.mesh);
+        deferredDestroyQueue.pop_front();
+    }
+}
+
+void VulkanApp::updateActiveMeshBounds() {
+    if (activeChunkMeshes.empty()) {
+        meshCenter = glm::vec3(0.0f);
+        meshRadius = 1.0f;
+        return;
+    }
+
+    glm::vec3 minCorner((std::numeric_limits<float>::max)());
+    glm::vec3 maxCorner(std::numeric_limits<float>::lowest());
+    bool hasGeometry = false;
+
+    for (const auto& [coord, mesh] : activeChunkMeshes) {
+        if (mesh.indexCount == 0) {
+            continue;
+        }
+        minCorner = (glm::min)(minCorner, mesh.minCorner);
+        maxCorner = (glm::max)(maxCorner, mesh.maxCorner);
+        hasGeometry = true;
+    }
+
+    if (!hasGeometry) {
+        meshCenter = glm::vec3(0.0f);
+        meshRadius = 1.0f;
+        return;
+    }
+
+    meshCenter = (minCorner + maxCorner) * 0.5f;
+    meshRadius = std::max(glm::length(maxCorner - meshCenter), 1.0f);
+}
+
+void VulkanApp::clearAllChunkMeshes() {
+    processDeferredDestroyQueue();
+    for (auto& [coord, mesh] : activeChunkMeshes) {
+        destroyChunkMeshResources(mesh);
+    }
+    activeChunkMeshes.clear();
+    completedEmptyChunkSet.clear();
+
+    for (auto& entry : deferredDestroyQueue) {
+        destroyChunkMeshResources(entry.mesh);
+    }
+    deferredDestroyQueue.clear();
+
+    for (auto& batch : pendingUploadBatches) {
+        if (batch.fence != VK_NULL_HANDLE) {
+            vkDestroyFence(device, batch.fence, nullptr);
+            batch.fence = VK_NULL_HANDLE;
+        }
+        if (batch.commandBuffer != VK_NULL_HANDLE) {
+            vkFreeCommandBuffers(device, commandPool, 1, &batch.commandBuffer);
+            batch.commandBuffer = VK_NULL_HANDLE;
+        }
+        for (const auto& staging : batch.stagingBuffers) {
+            if (staging.stagingVertex != VK_NULL_HANDLE) {
+                vkDestroyBuffer(device, staging.stagingVertex, nullptr);
+            }
+            if (staging.stagingVertexMemory != VK_NULL_HANDLE) {
+                vkFreeMemory(device, staging.stagingVertexMemory, nullptr);
+            }
+            if (staging.stagingIndex != VK_NULL_HANDLE) {
+                vkDestroyBuffer(device, staging.stagingIndex, nullptr);
+            }
+            if (staging.stagingIndexMemory != VK_NULL_HANDLE) {
+                vkFreeMemory(device, staging.stagingIndexMemory, nullptr);
+            }
+        }
+        for (auto& ready : batch.readyMeshes) {
+            destroyChunkMeshResources(ready.second);
+        }
+    }
+    pendingUploadBatches.clear();
+}
+
+ChunkCoord VulkanApp::chunkForPosition(const glm::vec3& position) const {
+    const int worldX = static_cast<int>(std::floor(position.x));
+    const int worldY = static_cast<int>(std::floor(position.y));
+    const int worldZ = static_cast<int>(std::floor(position.z));
+    return {
+        floorDiv(worldX, kChunkSize),
+        floorDiv(worldY, kChunkSize),
+        floorDiv(worldZ, kChunkSize)
+    };
+}
+
+float VulkanApp::sampleTerrainHeightAt(int worldX, int worldZ) const {
+    std::shared_lock<std::shared_mutex> worldLock(worldDataMutex);
+    const int activeRenderDistance = renderDistanceChunks.load(std::memory_order_relaxed);
+    const int minWorldY = (loadedTerrainCenterChunk.y - activeRenderDistance) * kChunkSize;
+    const int maxWorldY = (loadedTerrainCenterChunk.y + activeRenderDistance + 1) * kChunkSize - 1;
+
+    for (int worldY = maxWorldY; worldY >= minWorldY; --worldY) {
+        const auto voxel = world.getVoxel(worldX, worldY, worldZ);
+        if (voxel.has_value() && voxel->isSolid()) {
+            return static_cast<float>(worldY + 1);
+        }
+    }
+
+    return static_cast<float>(terrainSettings.baseHeight + 2.0f);
+}
+
+void VulkanApp::placeCameraOnTerrain() {
+    const int sampleX = loadedTerrainCenterChunk.x * kChunkSize + (kChunkSize / 2);
+    const int sampleZ = loadedTerrainCenterChunk.z * kChunkSize + (kChunkSize / 2);
+    const float terrainHeight = sampleTerrainHeightAt(sampleX, sampleZ);
+    const glm::vec3 spawnPosition(
+        static_cast<float>(sampleX) + 0.5f,
+        terrainHeight + 4.0f,
+        static_cast<float>(sampleZ) + 0.5f
+    );
+
+    camera.setPosition(spawnPosition);
+    camera.lookAt(spawnPosition + glm::vec3(1.0f, -0.2f, 1.0f));
+    inputController.syncOrientationFromCamera();
+    cameraPlacedOnTerrain = true;
+}
+
+void VulkanApp::processCompletedUploadBatches() {
+    bool boundsDirty = false;
+
+    while (!pendingUploadBatches.empty()) {
+        PendingUploadBatch& batch = pendingUploadBatches.front();
+        if (batch.fence == VK_NULL_HANDLE) {
+            break;
+        }
+
+        const VkResult fenceStatus = vkGetFenceStatus(device, batch.fence);
+        if (fenceStatus == VK_NOT_READY) {
+            break;
+        }
+        if (fenceStatus != VK_SUCCESS) {
+            break;
+        }
+
+        vkDestroyFence(device, batch.fence, nullptr);
+        batch.fence = VK_NULL_HANDLE;
+
+        if (batch.commandBuffer != VK_NULL_HANDLE) {
+            vkFreeCommandBuffers(device, commandPool, 1, &batch.commandBuffer);
+            batch.commandBuffer = VK_NULL_HANDLE;
+        }
+
+        for (const auto& staging : batch.stagingBuffers) {
+            if (staging.stagingVertex != VK_NULL_HANDLE) {
+                vkDestroyBuffer(device, staging.stagingVertex, nullptr);
+            }
+            if (staging.stagingVertexMemory != VK_NULL_HANDLE) {
+                vkFreeMemory(device, staging.stagingVertexMemory, nullptr);
+            }
+            if (staging.stagingIndex != VK_NULL_HANDLE) {
+                vkDestroyBuffer(device, staging.stagingIndex, nullptr);
+            }
+            if (staging.stagingIndexMemory != VK_NULL_HANDLE) {
+                vkFreeMemory(device, staging.stagingIndexMemory, nullptr);
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(chunkQueueMutex);
+            for (auto& ready : batch.readyMeshes) {
+                completedEmptyChunkSet.erase(ready.first);
+                auto existing = activeChunkMeshes.find(ready.first);
+                if (existing != activeChunkMeshes.end()) {
+                    enqueueChunkMeshForDestruction(std::move(existing->second));
+                    existing->second = std::move(ready.second);
+                } else {
+                    activeChunkMeshes[ready.first] = std::move(ready.second);
+                }
+                boundsDirty = true;
+            }
+        }
+
+        pendingUploadBatches.pop_front();
+    }
+
+    if (boundsDirty) {
+        loadedTerrainCenterChunk = requestedTerrainCenterChunk;
+        updateActiveMeshBounds();
     }
 }

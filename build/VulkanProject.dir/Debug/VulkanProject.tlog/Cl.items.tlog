@@ -2,4 +2,6 @@ C:\Dev\VulkanVoxelEngine\src\main.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProje
 C:\Dev\VulkanVoxelEngine\src\VulkanApp.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProject.dir\Debug\VulkanApp.obj
 C:\Dev\VulkanVoxelEngine\src\Camera.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProject.dir\Debug\Camera.obj
 C:\Dev\VulkanVoxelEngine\src\InputController.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProject.dir\Debug\InputController.obj
+C:\Dev\VulkanVoxelEngine\src\RenderLoop.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProject.dir\Debug\RenderLoop.obj
 C:\Dev\VulkanVoxelEngine\src\World.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProject.dir\Debug\World.obj
+C:\Dev\VulkanVoxelEngine\src\TerrainControlWindow.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProject.dir\Debug\TerrainControlWindow.obj

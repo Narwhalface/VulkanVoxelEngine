@@ -31,14 +31,19 @@ add_executable(${PROJECT_NAME}
     src/Camera.hpp
     src/InputController.cpp
     src/InputController.hpp
+    src/RenderLoop.cpp
+    src/RenderLoop.hpp
     src/World.cpp
     src/World.hpp
+    src/TerrainControlWindow.cpp
+    src/TerrainControlWindow.hpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
     GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
 )
 
@@ -91,11 +96,13 @@ if(WIN32)
         target_link_libraries(${PROJECT_NAME} PRIVATE
             Vulkan::Vulkan
             "${GLFW_DIR}/lib/glfw3.lib"
+            User32.lib
         )
     else()
         target_link_libraries(${PROJECT_NAME} PRIVATE
             ${Vulkan_LIBRARIES}
             "${GLFW_DIR}/lib/glfw3.lib"
+            User32.lib
         )
     endif()
 elseif(APPLE)

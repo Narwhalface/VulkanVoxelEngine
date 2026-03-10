@@ -7,6 +7,7 @@
 #include <glfw3.h>
 
 #define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
 
 #include <glm/glm.hpp>
@@ -15,10 +16,20 @@
 #include <array>
 #include <cstdint>
 #include <vector>
+#include <memory>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <unordered_set>
+#include <unordered_map>
+#include <deque>
+#include <condition_variable>
+#include <shared_mutex>
 
 #include "Camera.hpp"
 #include "InputController.hpp"
 #include "World.hpp"
+#include "TerrainControlWindow.hpp"
 
 struct Vertex {
     glm::vec3 pos;
@@ -41,6 +52,44 @@ public:
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
 
 private:
+    struct PendingChunkMesh {
+        ChunkCoord coord;
+        std::vector<Vertex> vertices;
+        std::vector<uint32_t> indices;
+        glm::vec3 minCorner{0.0f};
+        glm::vec3 maxCorner{0.0f};
+        bool hasGeometry = false;
+    };
+
+    struct GpuChunkMesh {
+        VkBuffer vertexBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
+        VkBuffer indexBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory indexBufferMemory = VK_NULL_HANDLE;
+        uint32_t indexCount = 0;
+        glm::vec3 minCorner{0.0f};
+        glm::vec3 maxCorner{0.0f};
+    };
+
+    struct DeferredDestroyEntry {
+        GpuChunkMesh mesh;
+        uint64_t retireAfterCompletedSubmission = 0;
+    };
+
+    struct UploadStagingBuffers {
+        VkBuffer stagingVertex = VK_NULL_HANDLE;
+        VkDeviceMemory stagingVertexMemory = VK_NULL_HANDLE;
+        VkBuffer stagingIndex = VK_NULL_HANDLE;
+        VkDeviceMemory stagingIndexMemory = VK_NULL_HANDLE;
+    };
+
+    struct PendingUploadBatch {
+        VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+        VkFence fence = VK_NULL_HANDLE;
+        std::vector<UploadStagingBuffers> stagingBuffers;
+        std::vector<std::pair<ChunkCoord, GpuChunkMesh>> readyMeshes;
+    };
+
     struct QueueFamilyIndices {
         uint32_t graphicsFamily = UINT32_MAX;
         uint32_t presentFamily  = UINT32_MAX;
@@ -92,6 +141,21 @@ private:
     void updateUniformBuffer(uint32_t currentImage);
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     void buildVoxelMesh();
+    ChunkCoord chunkForPosition(const glm::vec3& position) const;
+    float sampleTerrainHeightAt(int worldX, int worldZ) const;
+    void placeCameraOnTerrain();
+    void requestTerrainWindow(const ChunkCoord& centerChunk);
+    bool isChunkVisible(const GpuChunkMesh& mesh, const std::array<glm::vec4, 6>& frustumPlanes, float maxVisibleDistance, const glm::vec3& cameraPos) const;
+    void runChunkGenerationWorker();
+    void runChunkMeshWorker();
+    PendingChunkMesh buildChunkMeshData(const ChunkCoord& coord);
+    void uploadCompletedChunkMeshes();
+    void destroyChunkMeshResources(GpuChunkMesh& mesh);
+    void enqueueChunkMeshForDestruction(GpuChunkMesh&& mesh);
+    void processDeferredDestroyQueue();
+    void processCompletedUploadBatches();
+    void updateActiveMeshBounds();
+    void clearAllChunkMeshes();
 
     bool checkValidationLayerSupport() const;
     bool isDeviceSuitable(VkPhysicalDevice candidate) const;
@@ -150,13 +214,64 @@ private:
 
     std::vector<Vertex> voxelVertices;
     std::vector<uint32_t> voxelIndices;
+    static constexpr int kChunkUploadsPerFrame = 12;
+    static constexpr int kPrefetchRadiusExtra = 3;
+    static constexpr int kKeepRadiusExtra = 5;
+    static constexpr uint32_t kGenerationWorkerCount = 2;
+    static constexpr uint32_t kMeshingWorkerCount = 2;
+    static constexpr size_t kMaxCompletedChunkMeshes = 128;
+    static constexpr size_t kMaxGenerationJobs = 8192;
+    static constexpr size_t kMaxMeshJobs = 8192;
+    std::atomic<int> renderDistanceChunks{16};
     World world;
+    mutable std::shared_mutex worldDataMutex;
     TerrainSettings terrainSettings{};
     glm::vec3 meshCenter{0.0f};
     float meshRadius = 1.0f;
+    ChunkCoord loadedTerrainCenterChunk{};
+    ChunkCoord requestedTerrainCenterChunk{};
+    ChunkCoord pendingTerrainCenterChunk{};
+    bool cameraPlacedOnTerrain = false;
     Camera camera;
     InputController inputController;
     double lastFrameTimeSeconds = 0.0;
+    std::atomic<bool> meshNeedsRebuild{false};
+    std::unique_ptr<TerrainControlWindow> terrainControlWindow;
+    
+    // Async chunk streaming
+    std::vector<std::thread> generationWorkerThreads;
+    std::vector<std::thread> meshWorkerThreads;
+    std::vector<Vertex> pendingVertices;
+    std::vector<uint32_t> pendingIndices;
+    glm::vec3 pendingMeshCenter{0.0f};
+    float pendingMeshRadius = 1.0f;
+    std::mutex meshDataLock;
+    std::atomic<bool> meshBuildInProgress{false};
+    std::atomic<int> meshBuildProgress{0};  // 0-100
+    int totalChunksToLoad = 1;
+    std::deque<ChunkCoord> generationJobQueue;
+    std::deque<ChunkCoord> meshJobQueue;
+    std::unordered_set<ChunkCoord, ChunkCoordHash> desiredChunkSet;
+    std::unordered_set<ChunkCoord, ChunkCoordHash> keepChunkSet;
+    std::unordered_set<ChunkCoord, ChunkCoordHash> queuedOrGeneratingChunkSet;
+    std::unordered_set<ChunkCoord, ChunkCoordHash> queuedOrMeshingChunkSet;
+    std::deque<PendingChunkMesh> completedChunkMeshes;
+    std::deque<DeferredDestroyEntry> deferredDestroyQueue;
+    std::deque<PendingUploadBatch> pendingUploadBatches;
+    std::unordered_map<ChunkCoord, GpuChunkMesh, ChunkCoordHash> activeChunkMeshes;
+    std::unordered_set<ChunkCoord, ChunkCoordHash> completedEmptyChunkSet;
+    std::mutex chunkQueueMutex;
+    std::mutex completedChunkMutex;
+    std::condition_variable generationQueueCv;
+    std::condition_variable meshQueueCv;
+    std::atomic<bool> chunkWorkerRunning{false};
+    uint64_t submittedSubmissionCount = 0;
+    uint64_t completedSubmissionCount = 0;
+    uint32_t requestWindowUpdateCounter = 0;
+    
+    void rebuildVoxelMesh();
+    void buildVoxelMeshAsync();
+    void uploadPendingMesh();
 };
 
 #endif // VULKAN_APP_HPP

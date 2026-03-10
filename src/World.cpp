@@ -8,6 +8,7 @@
 
 namespace {
     constexpr int chunkSize = Chunk::SIZE;
+    constexpr std::size_t kMaxCachedColumnHeights = 262144;
 
     int floorDiv(int value, int divisor) noexcept {
         int quotient = value / divisor;
@@ -57,10 +58,35 @@ void Chunk::set(int localX, int localY, int localZ, const Voxel& voxel) {
     voxels[toIndex(localX, localY, localZ)] = voxel;
 }
 
+void Chunk::fillType(uint8_t type) {
+    for (Voxel& voxel : voxels) {
+        voxel.type = type;
+    }
+}
+
+void Chunk::setColumnRangeType(int localX, int localZ, int startY, int endY, uint8_t type) {
+    if (startY > endY) {
+        return;
+    }
+
+    const int clampedStart = (std::max)(0, startY);
+    const int clampedEnd = (std::min)(SIZE - 1, endY);
+    if (clampedStart > clampedEnd) {
+        return;
+    }
+
+    std::size_t index = toIndex(localX, clampedStart, localZ);
+    for (int localY = clampedStart; localY <= clampedEnd; ++localY) {
+        voxels[index].type = type;
+        index += SIZE;
+    }
+}
+
 void TerrainGenerator::configure(uint32_t seedValue, const TerrainSettings& settingsValue) {
     seed = seedValue;
     settings = settingsValue;
     enabled = true;
+    clearHeightCache();
 }
 
 void TerrainGenerator::disable() noexcept {
@@ -71,6 +97,14 @@ bool TerrainGenerator::isEnabled() const noexcept {
     return enabled;
 }
 
+uint32_t TerrainGenerator::getSeed() const noexcept {
+    return seed;
+}
+
+TerrainSettings TerrainGenerator::getSettings() const noexcept {
+    return settings;
+}
+
 void TerrainGenerator::populateChunk(const ChunkCoord& coord, Chunk& chunk) const {
     if (!enabled) {
         return;
@@ -79,27 +113,42 @@ void TerrainGenerator::populateChunk(const ChunkCoord& coord, Chunk& chunk) cons
     const int baseX = coord.x * chunkSize;
     const int baseY = coord.y * chunkSize;
     const int baseZ = coord.z * chunkSize;
+    const int chunkTopY = baseY + chunkSize - 1;
+
+    const int minTerrainHeight = static_cast<int>(std::floor(settings.baseHeight - settings.elevationAmplitude));
+    const int maxTerrainHeight = static_cast<int>(std::ceil(settings.baseHeight + settings.elevationAmplitude));
+    const int maxFilledHeight = (std::max)(maxTerrainHeight, settings.waterLevel);
+
+    if (baseY > maxFilledHeight) {
+        chunk.fillType(0);
+        return;
+    }
+
+    if (chunkTopY <= minTerrainHeight) {
+        chunk.fillType(1);
+        return;
+    }
+
+    chunk.fillType(0);
 
     for (int localZ = 0; localZ < chunkSize; ++localZ) {
         const int worldZ = baseZ + localZ;
         for (int localX = 0; localX < chunkSize; ++localX) {
             const int worldX = baseX + localX;
-            const float sampleX = static_cast<float>(worldX) * settings.horizontalScale;
-            const float sampleZ = static_cast<float>(worldZ) * settings.horizontalScale;
-            const float terrainNoise = fractalNoise(sampleX, sampleZ);
-            const float columnHeight = settings.baseHeight + settings.elevationAmplitude * terrainNoise;
-            const int maxSolidHeight = static_cast<int>(std::floor(columnHeight));
+            const int maxSolidHeight = sampleColumnHeight(worldX, worldZ);
 
-            for (int localY = 0; localY < chunkSize; ++localY) {
-                const int worldY = baseY + localY;
-                Voxel voxel{};
-                if (worldY <= maxSolidHeight) {
-                    voxel.type = (worldY == maxSolidHeight) ? 2 : 1;
-                } else if (worldY <= settings.waterLevel) {
-                    voxel.type = 3;
+            const int localSolidTop = maxSolidHeight - baseY;
+            if (localSolidTop >= 0) {
+                if (localSolidTop > 0) {
+                    chunk.setColumnRangeType(localX, localZ, 0, localSolidTop - 1, 1);
                 }
+                chunk.set(localX, (std::min)(localSolidTop, chunkSize - 1), localZ, Voxel{2});
+            }
 
-                chunk.set(localX, localY, localZ, voxel);
+            const int localWaterTop = settings.waterLevel - baseY;
+            const int waterStart = (std::max)(localSolidTop + 1, 0);
+            if (localWaterTop >= waterStart) {
+                chunk.setColumnRangeType(localX, localZ, waterStart, localWaterTop, 3);
             }
         }
     }
@@ -166,6 +215,40 @@ float TerrainGenerator::randomValue(int x, int z) const {
     return static_cast<float>(mantissa) / static_cast<float>(0xFFFFFF);
 }
 
+int TerrainGenerator::sampleColumnHeight(int worldX, int worldZ) const {
+    const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(worldX)) << 32)
+        | static_cast<uint64_t>(static_cast<uint32_t>(worldZ));
+
+    {
+        std::shared_lock<std::shared_mutex> readLock(cacheMutex);
+        const auto cacheIt = cachedColumnHeights.find(key);
+        if (cacheIt != cachedColumnHeights.end()) {
+            return cacheIt->second;
+        }
+    }
+
+    const float sampleX = static_cast<float>(worldX) * settings.horizontalScale;
+    const float sampleZ = static_cast<float>(worldZ) * settings.horizontalScale;
+    const float terrainNoise = fractalNoise(sampleX, sampleZ);
+    const float columnHeight = settings.baseHeight + settings.elevationAmplitude * terrainNoise;
+    const int maxSolidHeight = static_cast<int>(std::floor(columnHeight));
+
+    {
+        std::unique_lock<std::shared_mutex> writeLock(cacheMutex);
+        if (cachedColumnHeights.size() >= kMaxCachedColumnHeights) {
+            cachedColumnHeights.clear();
+        }
+        cachedColumnHeights.emplace(key, maxSolidHeight);
+    }
+
+    return maxSolidHeight;
+}
+
+void TerrainGenerator::clearHeightCache() {
+    std::unique_lock<std::shared_mutex> writeLock(cacheMutex);
+    cachedColumnHeights.clear();
+}
+
 World::World(uint32_t terrainSeed) {
     setTerrainGenerator(terrainSeed);
 }
@@ -222,4 +305,39 @@ std::optional<Voxel> World::getVoxel(int worldX, int worldY, int worldZ) const {
     const int localY = positiveModulo(worldY, chunkSize);
     const int localZ = positiveModulo(worldZ, chunkSize);
     return it->second.at(localX, localY, localZ);
+}
+
+void World::updateTerrainSettings(const TerrainSettings& settings) {
+    terrainGenerator.configure(terrainGenerator.getSeed(), settings);
+}
+
+TerrainSettings World::getTerrainSettings() const noexcept {
+    return terrainGenerator.getSettings();
+}
+
+void World::regenerateChunk(const ChunkCoord& coord) {
+    auto it = chunks.find(coord);
+    if (it != chunks.end()) {
+        terrainGenerator.populateChunk(coord, it->second);
+    }
+}
+
+void World::regenerateAllChunks() {
+    for (auto& [coord, chunk] : chunks) {
+        terrainGenerator.populateChunk(coord, chunk);
+    }
+}
+
+void World::retainChunks(const std::unordered_set<ChunkCoord, ChunkCoordHash>& keepSet) {
+    for (auto it = chunks.begin(); it != chunks.end();) {
+        if (keepSet.find(it->first) == keepSet.end()) {
+            it = chunks.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void World::clearAllChunks() {
+    chunks.clear();
 }

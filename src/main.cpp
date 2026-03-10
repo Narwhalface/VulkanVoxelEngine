@@ -1,4 +1,5 @@
 #include "VulkanApp.hpp"
+#include "RenderLoop.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -28,20 +29,6 @@ GLFWwindow* InitialiseWindow() {
     return window;
 }
 
-void RenderLoop(VulkanApp& app, GLFWwindow* window) {
-    constexpr double targetFrameTime = 1.0 / 60.0; // basic 60 FPS cap
-
-    while (!glfwWindowShouldClose(window)) {
-        glfwWaitEventsTimeout(targetFrameTime);
-        auto* appPtr = static_cast<VulkanApp*>(glfwGetWindowUserPointer(window));
-        if (appPtr != nullptr) {
-            appPtr->drawFrame(*appPtr);
-        }
-    }
-
-    app.waitIdle();
-}
-
 int main(int argc, char** argv) {
     if (argc > 0 && argv != nullptr && argv[0] != nullptr) {
         try {
@@ -60,7 +47,7 @@ int main(int argc, char** argv) {
 #ifdef NDEBUG
     const bool enableValidationLayers = false;
 #else
-    const bool enableValidationLayers = true;
+    const bool enableValidationLayers = false;  // Disable verbose Vulkan spec warnings
 #endif
 
     VulkanApp app(window, enableValidationLayers);

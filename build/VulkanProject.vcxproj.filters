@@ -13,7 +13,13 @@
     <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\InputController.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\RenderLoop.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\World.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\TerrainControlWindow.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -27,7 +33,13 @@
     <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\InputController.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\RenderLoop.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\World.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\TerrainControlWindow.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

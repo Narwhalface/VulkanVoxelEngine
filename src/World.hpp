@@ -4,7 +4,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
+#include <unordered_set>
 #include <unordered_map>
 
 struct Voxel {
@@ -31,6 +34,8 @@ public:
     Voxel& at(int localX, int localY, int localZ);
     const Voxel& at(int localX, int localY, int localZ) const;
     void set(int localX, int localY, int localZ, const Voxel& voxel);
+    void fillType(uint8_t type);
+    void setColumnRangeType(int localX, int localZ, int startY, int endY, uint8_t type);
 
 private:
     static std::size_t toIndex(int localX, int localY, int localZ);
@@ -55,15 +60,21 @@ public:
     void disable() noexcept;
     bool isEnabled() const noexcept;
     void populateChunk(const ChunkCoord& coord, Chunk& chunk) const;
+    uint32_t getSeed() const noexcept;
+    TerrainSettings getSettings() const noexcept;
 
 private:
     float fractalNoise(float x, float z) const;
     float valueNoise(float x, float z) const;
     float randomValue(int x, int z) const;
+    int sampleColumnHeight(int worldX, int worldZ) const;
+    void clearHeightCache();
 
     TerrainSettings settings{};
     uint32_t seed = 0;
     bool enabled = false;
+    mutable std::unordered_map<uint64_t, int> cachedColumnHeights;
+    mutable std::shared_mutex cacheMutex;
 };
 
 class World {
@@ -73,12 +84,19 @@ public:
 
     void setTerrainGenerator(uint32_t terrainSeed, const TerrainSettings& settings = TerrainSettings{});
     void disableTerrainGenerator() noexcept;
+    void updateTerrainSettings(const TerrainSettings& settings);
+    TerrainSettings getTerrainSettings() const noexcept;
 
     Voxel& setVoxel(int worldX, int worldY, int worldZ, const Voxel& voxel);
     std::optional<Voxel> getVoxel(int worldX, int worldY, int worldZ) const;
     bool hasChunk(const ChunkCoord& coord) const;
     Chunk& getOrCreateChunk(const ChunkCoord& coord);
     const Chunk* findChunk(const ChunkCoord& coord) const;
+    
+    void regenerateAllChunks();
+    void regenerateChunk(const ChunkCoord& coord);
+    void retainChunks(const std::unordered_set<ChunkCoord, ChunkCoordHash>& keepSet);
+    void clearAllChunks();
 
 private:
     ChunkCoord worldToChunk(int worldX, int worldY, int worldZ) const;
