@@ -279,6 +279,7 @@ void VulkanApp::cleanup() {
     chunkWorkerRunning.store(false, std::memory_order_relaxed);
     generationQueueCv.notify_all();
     meshQueueCv.notify_all();
+    completedChunkSpaceCv.notify_all();
 
     for (auto& worker : generationWorkerThreads) {
         if (worker.joinable()) {
@@ -1969,45 +1970,189 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
         return neighborChunk != nullptr && neighborChunk->at(sampleX, sampleY, sampleZ).isSolid();
     };
 
-    for (int localZ = 0; localZ < chunkSize; ++localZ) {
-        for (int localY = 0; localY < chunkSize; ++localY) {
-            for (int localX = 0; localX < chunkSize; ++localX) {
-                const Voxel& voxel = chunkSnapshot.at(localX, localY, localZ);
-                if (!voxel.isSolid()) {
-                    continue;
-                }
+    const auto appendFaceQuad = [&](int faceIndex, int slice, int u, int v, int width, int height, uint8_t voxelType) {
+        const glm::ivec3 normal = gFaceDefinitions[static_cast<size_t>(faceIndex)].normal;
+        const glm::vec3 baseColour = voxelBaseColor(voxelType, normal);
+        const float shade = shadeForNormal(normal);
+        const glm::vec3 colour = glm::clamp(baseColour * shade, glm::vec3(0.0f), glm::vec3(1.0f));
 
-                const int worldX = baseX + localX;
-                const int worldY = baseY + localY;
-                const int worldZ = baseZ + localZ;
-                const glm::vec3 basePosition(static_cast<float>(worldX), static_cast<float>(worldY), static_cast<float>(worldZ));
+        std::array<glm::vec3, 4> corners{};
 
-                for (const auto& face : gFaceDefinitions) {
-                    const int nx = localX + face.normal.x;
-                    const int ny = localY + face.normal.y;
-                    const int nz = localZ + face.normal.z;
+        switch (faceIndex) {
+            case 0: {
+                const float x = static_cast<float>(baseX + u);
+                const float y = static_cast<float>(baseY + v);
+                const float z = static_cast<float>(baseZ + slice);
+                corners = {{
+                    {x, y, z},
+                    {x, y + static_cast<float>(height), z},
+                    {x + static_cast<float>(width), y + static_cast<float>(height), z},
+                    {x + static_cast<float>(width), y, z}
+                }};
+                break;
+            }
+            case 1: {
+                const float x = static_cast<float>(baseX + u);
+                const float y = static_cast<float>(baseY + v);
+                const float z = static_cast<float>(baseZ + slice + 1);
+                corners = {{
+                    {x, y, z},
+                    {x + static_cast<float>(width), y, z},
+                    {x + static_cast<float>(width), y + static_cast<float>(height), z},
+                    {x, y + static_cast<float>(height), z}
+                }};
+                break;
+            }
+            case 2: {
+                const float x = static_cast<float>(baseX + slice);
+                const float y = static_cast<float>(baseY + v);
+                const float z = static_cast<float>(baseZ + u);
+                corners = {{
+                    {x, y, z},
+                    {x, y, z + static_cast<float>(width)},
+                    {x, y + static_cast<float>(height), z + static_cast<float>(width)},
+                    {x, y + static_cast<float>(height), z}
+                }};
+                break;
+            }
+            case 3: {
+                const float x = static_cast<float>(baseX + slice + 1);
+                const float y = static_cast<float>(baseY + v);
+                const float z = static_cast<float>(baseZ + u);
+                corners = {{
+                    {x, y, z},
+                    {x, y + static_cast<float>(height), z},
+                    {x, y + static_cast<float>(height), z + static_cast<float>(width)},
+                    {x, y, z + static_cast<float>(width)}
+                }};
+                break;
+            }
+            case 4: {
+                const float x = static_cast<float>(baseX + u);
+                const float y = static_cast<float>(baseY + slice);
+                const float z = static_cast<float>(baseZ + v);
+                corners = {{
+                    {x, y, z},
+                    {x + static_cast<float>(width), y, z},
+                    {x + static_cast<float>(width), y, z + static_cast<float>(height)},
+                    {x, y, z + static_cast<float>(height)}
+                }};
+                break;
+            }
+            default: {
+                const float x = static_cast<float>(baseX + u);
+                const float y = static_cast<float>(baseY + slice + 1);
+                const float z = static_cast<float>(baseZ + v);
+                corners = {{
+                    {x, y, z},
+                    {x, y, z + static_cast<float>(height)},
+                    {x + static_cast<float>(width), y, z + static_cast<float>(height)},
+                    {x + static_cast<float>(width), y, z}
+                }};
+                break;
+            }
+        }
+
+        const uint32_t startIndex = static_cast<uint32_t>(result.vertices.size());
+        for (const glm::vec3& position : corners) {
+            result.vertices.push_back(Vertex{position, colour});
+            result.minCorner = (glm::min)(result.minCorner, position);
+            result.maxCorner = (glm::max)(result.maxCorner, position);
+        }
+
+        result.indices.push_back(startIndex);
+        result.indices.push_back(startIndex + 1);
+        result.indices.push_back(startIndex + 2);
+        result.indices.push_back(startIndex);
+        result.indices.push_back(startIndex + 2);
+        result.indices.push_back(startIndex + 3);
+    };
+
+    std::vector<uint8_t> mask(static_cast<size_t>(chunkSize * chunkSize), 0);
+    for (int faceIndex = 0; faceIndex < static_cast<int>(gFaceDefinitions.size()); ++faceIndex) {
+        const glm::ivec3 normal = gFaceDefinitions[static_cast<size_t>(faceIndex)].normal;
+
+        for (int slice = 0; slice < chunkSize; ++slice) {
+            std::fill(mask.begin(), mask.end(), 0);
+
+            for (int v = 0; v < chunkSize; ++v) {
+                for (int u = 0; u < chunkSize; ++u) {
+                    int localX = 0;
+                    int localY = 0;
+                    int localZ = 0;
+
+                    switch (faceIndex) {
+                        case 0:
+                        case 1:
+                            localX = u;
+                            localY = v;
+                            localZ = slice;
+                            break;
+                        case 2:
+                        case 3:
+                            localX = slice;
+                            localY = v;
+                            localZ = u;
+                            break;
+                        default:
+                            localX = u;
+                            localY = slice;
+                            localZ = v;
+                            break;
+                    }
+
+                    const Voxel& voxel = chunkSnapshot.at(localX, localY, localZ);
+                    if (!voxel.isSolid()) {
+                        continue;
+                    }
+
+                    const int nx = localX + normal.x;
+                    const int ny = localY + normal.y;
+                    const int nz = localZ + normal.z;
                     if (isNeighborSolid(nx, ny, nz)) {
                         continue;
                     }
 
-                    const glm::vec3 baseColour = voxelBaseColor(voxel.type, face.normal);
-                    const float shade = shadeForNormal(face.normal);
-                    const glm::vec3 colour = glm::clamp(baseColour * shade, glm::vec3(0.0f), glm::vec3(1.0f));
-                    const uint32_t startIndex = static_cast<uint32_t>(result.vertices.size());
+                    mask[static_cast<size_t>(v * chunkSize + u)] = voxel.type;
+                }
+            }
 
-                    for (const auto& corner : face.corners) {
-                        const glm::vec3 position = basePosition + corner;
-                        result.vertices.push_back(Vertex{position, colour});
-                        result.minCorner = (glm::min)(result.minCorner, position);
-                        result.maxCorner = (glm::max)(result.maxCorner, position);
+            for (int v = 0; v < chunkSize; ++v) {
+                for (int u = 0; u < chunkSize; ) {
+                    const uint8_t voxelType = mask[static_cast<size_t>(v * chunkSize + u)];
+                    if (voxelType == 0) {
+                        ++u;
+                        continue;
                     }
 
-                    result.indices.push_back(startIndex);
-                    result.indices.push_back(startIndex + 1);
-                    result.indices.push_back(startIndex + 2);
-                    result.indices.push_back(startIndex);
-                    result.indices.push_back(startIndex + 2);
-                    result.indices.push_back(startIndex + 3);
+                    int width = 1;
+                    while (u + width < chunkSize && mask[static_cast<size_t>(v * chunkSize + (u + width))] == voxelType) {
+                        ++width;
+                    }
+
+                    int height = 1;
+                    bool canGrow = true;
+                    while (v + height < chunkSize && canGrow) {
+                        for (int k = 0; k < width; ++k) {
+                            if (mask[static_cast<size_t>((v + height) * chunkSize + (u + k))] != voxelType) {
+                                canGrow = false;
+                                break;
+                            }
+                        }
+                        if (canGrow) {
+                            ++height;
+                        }
+                    }
+
+                    appendFaceQuad(faceIndex, slice, u, v, width, height, voxelType);
+
+                    for (int dy = 0; dy < height; ++dy) {
+                        for (int dx = 0; dx < width; ++dx) {
+                            mask[static_cast<size_t>((v + dy) * chunkSize + (u + dx))] = 0;
+                        }
+                    }
+
+                    u += width;
                 }
             }
         }

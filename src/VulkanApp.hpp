@@ -262,6 +262,7 @@ private:
     std::mutex completedChunkMutex;
     std::condition_variable generationQueueCv;
     std::condition_variable meshQueueCv;
+    std::condition_variable completedChunkSpaceCv;
     std::atomic<bool> chunkWorkerRunning{false};
     uint64_t submittedSubmissionCount = 0;
     uint64_t completedSubmissionCount = 0;

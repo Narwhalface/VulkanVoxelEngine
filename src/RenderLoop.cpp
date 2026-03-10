@@ -28,6 +28,30 @@ int floorDiv(int value, int divisor) noexcept {
     }
     return quotient;
 }
+
+std::array<glm::vec4, 6> extractFrustumPlanes(const glm::mat4& viewProjection) {
+    const glm::vec4 row0(viewProjection[0][0], viewProjection[1][0], viewProjection[2][0], viewProjection[3][0]);
+    const glm::vec4 row1(viewProjection[0][1], viewProjection[1][1], viewProjection[2][1], viewProjection[3][1]);
+    const glm::vec4 row2(viewProjection[0][2], viewProjection[1][2], viewProjection[2][2], viewProjection[3][2]);
+    const glm::vec4 row3(viewProjection[0][3], viewProjection[1][3], viewProjection[2][3], viewProjection[3][3]);
+
+    std::array<glm::vec4, 6> planes{{
+        row3 + row0, // Left
+        row3 - row0, // Right
+        row3 + row1, // Bottom
+        row3 - row1, // Top
+        row3 + row2, // Near
+        row3 - row2  // Far
+    }};
+
+    for (glm::vec4& plane : planes) {
+        const glm::vec3 normal(plane.x, plane.y, plane.z);
+        const float invLength = 1.0f / (std::max)(glm::length(normal), 1e-5f);
+        plane *= invLength;
+    }
+
+    return planes;
+}
 }
 
 void VulkanApp::drawFrame(VulkanApp& app) {
@@ -219,6 +243,10 @@ void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imag
 
     const ChunkCoord renderCenter = chunkForPosition(camera.position());
     const int drawKeepRadius = renderDistanceChunks.load(std::memory_order_relaxed) + kKeepRadiusExtra + 2;
+    const glm::vec3 cameraPos = camera.position();
+    const glm::mat4 viewProjection = camera.projectionMatrix() * camera.viewMatrix();
+    const std::array<glm::vec4, 6> frustumPlanes = extractFrustumPlanes(viewProjection);
+    const float maxVisibleDistance = static_cast<float>(drawKeepRadius * kChunkSize);
 
     std::vector<DrawChunkEntry> drawEntries;
     drawEntries.reserve(activeChunkMeshes.size());
@@ -233,6 +261,10 @@ void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imag
             const int dx = std::abs(coord.x - renderCenter.x);
             const int dz = std::abs(coord.z - renderCenter.z);
             if ((std::max)(dx, dz) > drawKeepRadius) {
+                continue;
+            }
+
+            if (!isChunkVisible(mesh, frustumPlanes, maxVisibleDistance, cameraPos)) {
                 continue;
             }
 
@@ -586,21 +618,18 @@ void VulkanApp::runChunkMeshWorker() {
             }
         }
 
-        while (chunkWorkerRunning.load(std::memory_order_relaxed)) {
-            bool queued = false;
-            {
-                std::lock_guard<std::mutex> lock(completedChunkMutex);
-                if (completedChunkMeshes.size() < kMaxCompletedChunkMeshes) {
-                    completedChunkMeshes.push_back(std::move(meshData));
-                    queued = true;
-                }
+        {
+            std::unique_lock<std::mutex> lock(completedChunkMutex);
+            completedChunkSpaceCv.wait(lock, [this]() {
+                return !chunkWorkerRunning.load(std::memory_order_relaxed)
+                    || completedChunkMeshes.size() < kMaxCompletedChunkMeshes;
+            });
+
+            if (!chunkWorkerRunning.load(std::memory_order_relaxed)) {
+                return;
             }
 
-            if (queued) {
-                break;
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            completedChunkMeshes.push_back(std::move(meshData));
         }
     }
 }
@@ -644,6 +673,7 @@ void VulkanApp::uploadCompletedChunkMeshes() {
             pending = std::move(completedChunkMeshes.front());
             completedChunkMeshes.pop_front();
         }
+        completedChunkSpaceCv.notify_one();
 
         {
             std::lock_guard<std::mutex> lock(chunkQueueMutex);

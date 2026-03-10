@@ -5,7 +5,7 @@
 render_distance = 12
 
 -- Terrain noise intensity mapped to elevation amplitude (valid range in app: 1.0 to 128.0)
-noise_intensity = 80.0
+noise_intensity = 10.0
 
 -- Randomize terrain every launch (true = new random world seed each run)
 randomize_seed = true
