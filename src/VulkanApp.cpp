@@ -1,4 +1,5 @@
 #include "VulkanApp.hpp"
+#include "LuaTerrainScriptBridge.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -14,6 +15,7 @@
 #include <fstream>
 #include <chrono>
 #include <mutex>
+#include <random>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <array>
@@ -191,7 +193,45 @@ void VulkanApp::initialize() {
     terrainSettings.persistence = 0.55f;
     terrainSettings.lacunarity = 2.0f;
     terrainSettings.waterLevel = 10;
-    world.setTerrainGenerator(1337u, terrainSettings);
+
+    const auto scriptValues = LuaTerrainScriptBridge::loadScript(resolveAssetPath("scripts/terrain.lua"));
+    if (!scriptValues.errorMessage.empty()) {
+        std::cout << "Lua terrain script warning: " << scriptValues.errorMessage << "\n";
+    } else {
+        std::cout << "Lua terrain script loaded successfully.\n";
+    }
+
+    if (scriptValues.noiseIntensity.has_value()) {
+        terrainSettings.elevationAmplitude = std::clamp(*scriptValues.noiseIntensity, 1.0f, 128.0f);
+    }
+
+    if (scriptValues.renderDistanceChunks.has_value()) {
+        const int clampedDistance = (std::max)(2, (std::min)(16, *scriptValues.renderDistanceChunks));
+        renderDistanceChunks.store(clampedDistance, std::memory_order_relaxed);
+    }
+
+    uint32_t terrainSeed = 1337u;
+    if (scriptValues.randomizeSeed.value_or(false)) {
+        std::random_device randomDevice;
+        std::mt19937 generator(randomDevice());
+        std::uniform_int_distribution<uint32_t> distribution;
+        terrainSeed = distribution(generator);
+    }
+    if (scriptValues.terrainSeed.has_value()) {
+        terrainSeed = *scriptValues.terrainSeed;
+    }
+
+    std::cout
+        << "Lua terrain values: render_distance="
+        << renderDistanceChunks.load(std::memory_order_relaxed)
+        << ", noise_intensity="
+        << terrainSettings.elevationAmplitude
+        << ", terrain_seed="
+        << terrainSeed
+        << "\n";
+    std::cout << "Current terrain seed: " << terrainSeed << "\n";
+
+    world.setTerrainGenerator(terrainSeed, terrainSettings);
 
     const float initialHeight = terrainSettings.baseHeight + terrainSettings.elevationAmplitude + 8.0f;
     camera.setPosition(glm::vec3(0.5f, initialHeight, 0.5f));
@@ -233,18 +273,6 @@ void VulkanApp::initialize() {
     inputController.attach(windowRef, &camera);
     inputController.syncOrientationFromCamera();
     lastFrameTimeSeconds = glfwGetTime();
-
-    // Create terrain control window
-    terrainControlWindow = std::make_unique<TerrainControlWindow>(renderDistanceChunks.load(std::memory_order_relaxed));
-    terrainControlWindow->setRenderDistanceCallback([this](int newRenderDistance) {
-        const int clampedDistance = (std::max)(2, (std::min)(16, newRenderDistance));
-        this->renderDistanceChunks.store(clampedDistance, std::memory_order_relaxed);
-        {
-            std::lock_guard<std::mutex> lock(this->chunkQueueMutex);
-            this->requestedTerrainCenterChunk = this->chunkForPosition(this->camera.position());
-        }
-        this->meshNeedsRebuild.store(true, std::memory_order_relaxed);
-    });
 }
 
 void VulkanApp::cleanup() {

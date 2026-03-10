@@ -29,7 +29,6 @@
 #include "Camera.hpp"
 #include "InputController.hpp"
 #include "World.hpp"
-#include "TerrainControlWindow.hpp"
 
 struct Vertex {
     glm::vec3 pos;
@@ -236,7 +235,6 @@ private:
     InputController inputController;
     double lastFrameTimeSeconds = 0.0;
     std::atomic<bool> meshNeedsRebuild{false};
-    std::unique_ptr<TerrainControlWindow> terrainControlWindow;
     
     // Async chunk streaming
     std::vector<std::thread> generationWorkerThreads;

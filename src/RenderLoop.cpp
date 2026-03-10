@@ -112,21 +112,6 @@ void VulkanApp::drawFrame(VulkanApp& app) {
         }
     }
     
-    if (app.terrainControlWindow) {
-        app.terrainControlWindow->update();
-        
-        static bool lastTKeyState = false;
-        bool currentTKeyState = glfwGetKey(app.windowRef, GLFW_KEY_T) == GLFW_PRESS;
-        if (currentTKeyState && !lastTKeyState) {
-            if (app.terrainControlWindow->isOpen()) {
-                app.terrainControlWindow->hide();
-            } else {
-                app.terrainControlWindow->show();
-            }
-        }
-        lastTKeyState = currentTKeyState;
-    }
-
     if (app.meshNeedsRebuild.exchange(false, std::memory_order_relaxed)) {
         app.rebuildVoxelMesh();
     }

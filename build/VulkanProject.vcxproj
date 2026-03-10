@@ -351,8 +351,6 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\RenderLoop.hpp" />
     <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\World.cpp" />
     <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\World.hpp" />
-    <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\TerrainControlWindow.cpp" />
-    <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\TerrainControlWindow.hpp" />
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>

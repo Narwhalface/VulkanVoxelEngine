@@ -19,9 +19,6 @@
     <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\World.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Dev\VulkanVoxelEngine\src\TerrainControlWindow.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\VulkanApp.hpp">
@@ -37,9 +34,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\World.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="C:\Dev\VulkanVoxelEngine\src\TerrainControlWindow.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

@@ -35,8 +35,6 @@ add_executable(${PROJECT_NAME}
     src/RenderLoop.hpp
     src/World.cpp
     src/World.hpp
-    src/TerrainControlWindow.cpp
-    src/TerrainControlWindow.hpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
