@@ -8,20 +8,30 @@
 #include <cmath>
 #include <cstring>
 #include <glfw3.h>
+#include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace {
 constexpr int kChunkSize = Chunk::SIZE;
+constexpr bool kLogRenderedChunkStats = false;
+constexpr float kVisibilityDistancePadding = static_cast<float>(kChunkSize) * 2.0f;
 double gSmoothedFrameTimeMs = 16.6;
 
 struct DrawChunkEntry {
     VkBuffer vertexBuffer = VK_NULL_HANDLE;
     VkBuffer indexBuffer = VK_NULL_HANDLE;
+    uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
 };
 
+/**
+ * Divides integers using floor semantics for negative values.
+ * @param value Dividend.
+ * @param divisor Divisor.
+ * @return Floored quotient.
+ */
 int floorDiv(int value, int divisor) noexcept {
-    // Divides value by divisor with floor semantics for negative values; returns floored quotient.
     int quotient = value / divisor;
     const int remainder = value % divisor;
     if (remainder != 0 && ((remainder < 0) != (divisor < 0))) {
@@ -30,8 +40,12 @@ int floorDiv(int value, int divisor) noexcept {
     return quotient;
 }
 
+/**
+ * Extracts normalized clipping planes from a view-projection matrix.
+ * @param viewProjection Combined view-projection matrix.
+ * @return Array containing six normalized frustum planes.
+ */
 std::array<glm::vec4, 6> extractFrustumPlanes(const glm::mat4& viewProjection) {
-    // Extracts normalized frustum planes from a view-projection matrix input; returns six clipping planes.
     const glm::vec4 row0(viewProjection[0][0], viewProjection[1][0], viewProjection[2][0], viewProjection[3][0]);
     const glm::vec4 row1(viewProjection[0][1], viewProjection[1][1], viewProjection[2][1], viewProjection[3][1]);
     const glm::vec4 row2(viewProjection[0][2], viewProjection[1][2], viewProjection[2][2], viewProjection[3][2]);
@@ -56,8 +70,12 @@ std::array<glm::vec4, 6> extractFrustumPlanes(const glm::mat4& viewProjection) {
 }
 }
 
+/**
+ * Renders and presents one frame while updating streaming and uploads.
+ * @param app Application instance used by the frame draw path.
+ * @return No return value.
+ */
 void VulkanApp::drawFrame(VulkanApp& app) {
-    // Advances one frame: input handling, streaming updates, draw submission, and present; takes app and returns nothing.
     const double currentTime = glfwGetTime();
     double deltaSeconds = currentTime - lastFrameTimeSeconds;
     lastFrameTimeSeconds = currentTime;
@@ -212,8 +230,13 @@ void VulkanApp::drawFrame(VulkanApp& app) {
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
+/**
+ * Records render commands for one swapchain image.
+ * @param commandBuffer Command buffer to record into.
+ * @param imageIndex Swapchain image index targeted by the commands.
+ * @return No return value.
+ */
 void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
-    // Records draw commands for one swapchain image; inputs commandBuffer/imageIndex and outputs no return value.
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = 0;
@@ -250,7 +273,8 @@ void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imag
     const glm::vec3 cameraPos = camera.position();
     const glm::mat4 viewProjection = camera.projectionMatrix() * camera.viewMatrix();
     const std::array<glm::vec4, 6> frustumPlanes = extractFrustumPlanes(viewProjection);
-    const float maxVisibleDistance = static_cast<float>(drawKeepRadius * kChunkSize);
+    const float drawDistanceExtent = static_cast<float>(drawKeepRadius * kChunkSize);
+    const float maxVisibleDistance = drawDistanceExtent * std::sqrt(2.0f) + kVisibilityDistancePadding;
 
     std::vector<DrawChunkEntry> drawEntries;
     drawEntries.reserve(activeChunkMeshes.size());
@@ -272,7 +296,26 @@ void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imag
                 continue;
             }
 
-            drawEntries.push_back(DrawChunkEntry{mesh.vertexBuffer, mesh.indexBuffer, mesh.indexCount});
+            drawEntries.push_back(DrawChunkEntry{mesh.vertexBuffer, mesh.indexBuffer, mesh.vertexCount, mesh.indexCount});
+        }
+    }
+
+    if constexpr (kLogRenderedChunkStats) {
+        uint64_t renderedVertexCount = 0;
+        uint64_t renderedVoxelFaceCount = 0;
+        for (const DrawChunkEntry& drawEntry : drawEntries) {
+            renderedVertexCount += static_cast<uint64_t>(drawEntry.vertexCount);
+            renderedVoxelFaceCount += static_cast<uint64_t>(drawEntry.indexCount / 6u);
+        }
+
+        // Suppress repeated stat logs until the rendered vertex count changes.
+        static uint64_t lastPrintedRenderedVertexCount = std::numeric_limits<uint64_t>::max();
+        if (renderedVertexCount != lastPrintedRenderedVertexCount) {
+            lastPrintedRenderedVertexCount = renderedVertexCount;
+            std::cout
+                << "Rendered vertices: " << renderedVertexCount
+                << " | Rendered voxel faces: " << renderedVoxelFaceCount
+                << "\n";
         }
     }
 
@@ -290,8 +333,12 @@ void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imag
     }
 }
 
+/**
+ * Updates target and keep chunk windows around a center chunk.
+ * @param centerChunk Center chunk coordinate for streaming window.
+ * @return No return value.
+ */
 void VulkanApp::requestTerrainWindow(const ChunkCoord& centerChunk) {
-    // Rebuilds chunk streaming targets around centerChunk and schedules generation/meshing jobs; outputs no return value.
     const int minTerrainHeight = static_cast<int>(std::floor(terrainSettings.baseHeight - terrainSettings.elevationAmplitude)) - 1;
     const int maxTerrainHeight = static_cast<int>(std::ceil(terrainSettings.baseHeight + terrainSettings.elevationAmplitude)) + 1;
     const int maxFilledHeight = (std::max)(maxTerrainHeight, terrainSettings.waterLevel + 1);
@@ -422,11 +469,13 @@ void VulkanApp::requestTerrainWindow(const ChunkCoord& centerChunk) {
             ringBuckets[static_cast<size_t>(ringDistance)].push_back(coord);
         }
 
-        size_t enqueueBudget = static_cast<size_t>(512 + activeRenderDistance * 48);
-        if (gSmoothedFrameTimeMs > 22.0) {
-            enqueueBudget = (std::max)(static_cast<size_t>(192), enqueueBudget / 2);
-        } else if (gSmoothedFrameTimeMs < 14.0) {
-            enqueueBudget = enqueueBudget + enqueueBudget / 2;
+        size_t enqueueBudget = static_cast<size_t>(160 + activeRenderDistance * 20);
+        if (gSmoothedFrameTimeMs > 24.0) {
+            enqueueBudget = (std::max)(static_cast<size_t>(96), enqueueBudget / 3);
+        } else if (gSmoothedFrameTimeMs > 18.0) {
+            enqueueBudget = (std::max)(static_cast<size_t>(128), enqueueBudget / 2);
+        } else if (gSmoothedFrameTimeMs < 13.0) {
+            enqueueBudget = enqueueBudget + enqueueBudget / 3;
         }
         const size_t availableSlots = remainingGenerationSlots + remainingMeshSlots;
         if (enqueueBudget > availableSlots) {
@@ -514,6 +563,12 @@ void VulkanApp::requestTerrainWindow(const ChunkCoord& centerChunk) {
                 if (keepSet.find(neighbor) == keepSet.end()) {
                     continue;
                 }
+                {
+                    std::shared_lock<std::shared_mutex> worldLock(worldDataMutex);
+                    if (!world.hasChunk(neighbor)) {
+                        continue;
+                    }
+                }
                 if (queuedOrMeshingChunkSet.find(neighbor) != queuedOrMeshingChunkSet.end()) {
                     continue;
                 }
@@ -532,8 +587,11 @@ void VulkanApp::requestTerrainWindow(const ChunkCoord& centerChunk) {
     meshQueueCv.notify_all();
 }
 
+/**
+ * Worker loop that generates chunk voxel data.
+ * @return No return value.
+ */
 void VulkanApp::runChunkGenerationWorker() {
-    // Worker loop that consumes generation jobs and ensures chunks exist; takes no inputs and outputs no return value.
     while (chunkWorkerRunning.load(std::memory_order_relaxed)) {
         ChunkCoord coord{};
         bool hasJob = false;
@@ -575,12 +633,55 @@ void VulkanApp::runChunkGenerationWorker() {
         {
             std::lock_guard<std::mutex> lock(chunkQueueMutex);
             queuedOrGeneratingChunkSet.erase(coord);
-            if (keepChunkSet.find(coord) != keepChunkSet.end() &&
-                activeChunkMeshes.find(coord) == activeChunkMeshes.end() &&
-                completedEmptyChunkSet.find(coord) == completedEmptyChunkSet.end() &&
-                queuedOrMeshingChunkSet.find(coord) == queuedOrMeshingChunkSet.end() && meshJobQueue.size() < kMaxMeshJobs) {
-                meshJobQueue.push_back(coord);
-                queuedOrMeshingChunkSet.insert(coord);
+
+            const auto enqueueMeshJob = [&](const ChunkCoord& targetCoord, bool forceRemesh) {
+                if (keepChunkSet.find(targetCoord) == keepChunkSet.end()) {
+                    return;
+                }
+                if (queuedOrMeshingChunkSet.find(targetCoord) != queuedOrMeshingChunkSet.end()) {
+                    return;
+                }
+                if (!forceRemesh) {
+                    if (activeChunkMeshes.find(targetCoord) != activeChunkMeshes.end()) {
+                        return;
+                    }
+                    if (completedEmptyChunkSet.find(targetCoord) != completedEmptyChunkSet.end()) {
+                        return;
+                    }
+                }
+                if (meshJobQueue.size() >= kMaxMeshJobs) {
+                    return;
+                }
+
+                meshJobQueue.push_back(targetCoord);
+                queuedOrMeshingChunkSet.insert(targetCoord);
+            };
+
+            // Mesh the newly generated chunk if it is not already represented.
+            enqueueMeshJob(coord, false);
+
+            // Also remesh adjacent loaded chunks so shared border faces are culled.
+            static constexpr std::array<ChunkCoord, 6> kNeighborOffsets{{
+                {-1, 0, 0}, {1, 0, 0},
+                {0, -1, 0}, {0, 1, 0},
+                {0, 0, -1}, {0, 0, 1}
+            }};
+
+            for (const ChunkCoord& offset : kNeighborOffsets) {
+                const ChunkCoord neighborCoord{
+                    coord.x + offset.x,
+                    coord.y + offset.y,
+                    coord.z + offset.z
+                };
+
+                const bool neighborLoaded =
+                    activeChunkMeshes.find(neighborCoord) != activeChunkMeshes.end()
+                    || completedEmptyChunkSet.find(neighborCoord) != completedEmptyChunkSet.end();
+                if (!neighborLoaded) {
+                    continue;
+                }
+
+                enqueueMeshJob(neighborCoord, true);
             }
         }
 
@@ -588,8 +689,11 @@ void VulkanApp::runChunkGenerationWorker() {
     }
 }
 
+/**
+ * Worker loop that builds mesh data from generated chunks.
+ * @return No return value.
+ */
 void VulkanApp::runChunkMeshWorker() {
-    // Worker loop that consumes meshing jobs and queues completed meshes; takes no inputs and outputs no return value.
     while (chunkWorkerRunning.load(std::memory_order_relaxed)) {
         ChunkCoord coord{};
         bool hasJob = false;
@@ -641,8 +745,11 @@ void VulkanApp::runChunkMeshWorker() {
     }
 }
 
+/**
+ * Uploads completed chunk meshes to GPU buffers.
+ * @return No return value.
+ */
 void VulkanApp::uploadCompletedChunkMeshes() {
-    // Uploads completed CPU chunk meshes to GPU in batched transfers; takes no inputs and outputs no return value.
     std::vector<std::pair<ChunkCoord, GpuChunkMesh>> readyGpuMeshes;
     std::vector<UploadStagingBuffers> uploadStaging;
     readyGpuMeshes.reserve(kChunkUploadsPerFrame);
@@ -658,17 +765,19 @@ void VulkanApp::uploadCompletedChunkMeshes() {
     }
 
     int uploadBudget = kChunkUploadsPerFrame;
-    if (gSmoothedFrameTimeMs > 22.0) {
+    if (gSmoothedFrameTimeMs > 24.0) {
+        uploadBudget = (std::max)(3, kChunkUploadsPerFrame / 3);
+    } else if (gSmoothedFrameTimeMs > 18.0) {
         uploadBudget = (std::max)(4, kChunkUploadsPerFrame / 2);
-    } else if (gSmoothedFrameTimeMs < 14.0) {
-        uploadBudget = kChunkUploadsPerFrame * 2;
+    } else if (gSmoothedFrameTimeMs < 13.0) {
+        uploadBudget = kChunkUploadsPerFrame + kChunkUploadsPerFrame / 2;
     }
     if (completedBacklog > (kMaxCompletedChunkMeshes * 3) / 4) {
-        uploadBudget += 8;
-    } else if (completedBacklog > kMaxCompletedChunkMeshes / 2) {
         uploadBudget += 4;
+    } else if (completedBacklog > kMaxCompletedChunkMeshes / 2) {
+        uploadBudget += 2;
     }
-    uploadBudget = (std::min)(uploadBudget, 24);
+    uploadBudget = (std::min)(uploadBudget, 16);
 
     int uploadedCount = 0;
     while (uploadedCount < uploadBudget) {
@@ -697,6 +806,7 @@ void VulkanApp::uploadCompletedChunkMeshes() {
 
         if (pending.hasGeometry) {
             GpuChunkMesh gpuMesh{};
+            gpuMesh.vertexCount = static_cast<uint32_t>(pending.vertices.size());
             gpuMesh.indexCount = static_cast<uint32_t>(pending.indices.size());
             gpuMesh.minCorner = pending.minCorner;
             gpuMesh.maxCorner = pending.maxCorner;
@@ -752,6 +862,16 @@ void VulkanApp::uploadCompletedChunkMeshes() {
             uploadStaging.push_back(buffers);
             readyGpuMeshes.emplace_back(pending.coord, std::move(gpuMesh));
         } else {
+            bool chunkExists = false;
+            {
+                std::shared_lock<std::shared_mutex> worldLock(worldDataMutex);
+                chunkExists = world.hasChunk(pending.coord);
+            }
+            if (!chunkExists) {
+                ++uploadedCount;
+                continue;
+            }
+
             std::lock_guard<std::mutex> lock(chunkQueueMutex);
             completedEmptyChunkSet.insert(pending.coord);
         }
@@ -796,10 +916,16 @@ void VulkanApp::uploadCompletedChunkMeshes() {
         loadedTerrainCenterChunk = requestedTerrainCenterChunk;
         updateActiveMeshBounds();
     }
+
 }
 
+/**
+ * Runs the main event/render loop until the window closes.
+ * @param app Vulkan application instance used to render frames.
+ * @param window GLFW window used for event processing and close checks.
+ * @return No return value.
+ */
 void RenderLoop(VulkanApp& app, GLFWwindow* window) {
-    // Runs the main render/event loop until window closes; inputs app/window and returns no value.
     constexpr double targetFrameTime = 1.0 / 60.0; // basic 60 FPS cap
 
     while (!glfwWindowShouldClose(window)) {

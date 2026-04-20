@@ -7,8 +7,11 @@ namespace {
 constexpr float kEpsilon = 1e-6f;
 }
 
+/**
+ * Sets up default camera position, orientation, and projection values.
+ * @return No return value.
+ */
 Camera::Camera()
-	// Initializes default camera position/orientation and projection values; takes no inputs and returns a Camera instance.
 	: eyePosition(0.0f, 0.0f, 0.0f),
 	  forwardDirection(0.0f, 0.0f, -1.0f),
 	  upDirection(0.0f, 1.0f, 0.0f),
@@ -17,69 +20,111 @@ Camera::Camera()
 	  nearPlane(0.1f),
 	  farPlane(500.0f) {}
 
+/**
+ * Updates perspective projection settings.
+ * @param fieldOfViewDegrees Vertical field of view in degrees.
+ * @param aspectRatioValue Width-to-height aspect ratio.
+ * @param nearPlaneValue Near clipping distance.
+ * @param farPlaneValue Far clipping distance.
+ * @return No return value.
+ */
 void Camera::setPerspective(float fieldOfViewDegrees, float aspectRatioValue, float nearPlaneValue, float farPlaneValue) {
-	// Sets perspective parameters from FOV/aspect/near/far inputs and clamps valid planes; outputs no return value.
 	fieldOfViewRadians = glm::radians(fieldOfViewDegrees);
 	aspectRatio = aspectRatioValue;
 	nearPlane = std::max(nearPlaneValue, kEpsilon);
 	farPlane = std::max(farPlaneValue, nearPlane + kEpsilon);
 }
 
+/**
+ * Sets camera world-space position.
+ * @param value New position vector.
+ * @return No return value.
+ */
 void Camera::setPosition(const glm::vec3& value) {
-	// Sets camera world position from value input; outputs no return value.
 	eyePosition = value;
 }
 
+/**
+ * Sets camera up direction.
+ * @param value New up vector.
+ * @return No return value.
+ */
 void Camera::setUp(const glm::vec3& value) {
-	// Sets normalized up vector when input is non-zero; outputs no return value.
 	if (glm::dot(value, value) <= kEpsilon) {
 		return;
 	}
 	upDirection = glm::normalize(value);
 }
 
+/**
+ * Sets camera forward direction.
+ * @param value New forward vector.
+ * @return No return value.
+ */
 void Camera::setDirection(const glm::vec3& value) {
-	// Sets normalized forward direction when input is non-zero; outputs no return value.
 	if (glm::dot(value, value) <= kEpsilon) {
 		return;
 	}
 	forwardDirection = glm::normalize(value);
 }
 
+/**
+ * Rotates camera to look at a world-space target.
+ * @param target Target point to look toward.
+ * @param upHint Optional up direction hint.
+ * @return No return value.
+ */
 void Camera::lookAt(const glm::vec3& target, const glm::vec3& upHint) {
-	// Orients camera toward target using an optional up hint input; outputs no return value.
 	setUp(upHint);
 	setDirection(target - eyePosition);
 }
 
+/**
+ * Returns current camera position.
+ * @return Camera position vector.
+ */
 glm::vec3 Camera::position() const {
-	// Returns current camera position; takes no inputs.
 	return eyePosition;
 }
 
+/**
+ * Returns current camera forward direction.
+ * @return Normalized forward direction vector.
+ */
 glm::vec3 Camera::direction() const {
-	// Returns current forward direction vector; takes no inputs.
 	return forwardDirection;
 }
 
+/**
+ * Returns current camera up direction.
+ * @return Normalized up direction vector.
+ */
 glm::vec3 Camera::upVector() const {
-	// Returns current up vector; takes no inputs.
 	return upDirection;
 }
 
+/**
+ * Builds the view matrix from camera state.
+ * @return View matrix.
+ */
 glm::mat4 Camera::viewMatrix() const {
-	// Builds and returns the view matrix from position and orientation; takes no inputs.
 	return glm::lookAt(eyePosition, eyePosition + forwardDirection, upDirection);
 }
 
+/**
+ * Builds the projection matrix from camera perspective settings.
+ * @return Projection matrix.
+ */
 glm::mat4 Camera::projectionMatrix() const {
-	// Builds and returns a Vulkan-corrected perspective projection matrix; takes no inputs.
 	glm::mat4 projection = glm::perspective(fieldOfViewRadians, aspectRatio, nearPlane, farPlane);
 	projection[1][1] *= -1.0f;
 	return projection;
 }
 
+/**
+ * Builds the combined projection * view matrix.
+ * @return View-projection matrix.
+ */
 glm::mat4 Camera::viewProjectionMatrix() const {
-	// Returns combined projection*view matrix for rendering; takes no inputs.
 	return projectionMatrix() * viewMatrix();
 }

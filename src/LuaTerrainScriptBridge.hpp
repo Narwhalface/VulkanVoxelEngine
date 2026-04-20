@@ -23,8 +23,12 @@ public:
         std::string errorMessage;
     };
 
+    /**
+     * Loads terrain settings from a Lua script file.
+     * @param scriptPath Filesystem path to the Lua script.
+     * @return Parsed script values and optional error message.
+     */
     static ScriptValues loadScript(const std::filesystem::path& scriptPath) {
-        // Loads terrain settings from a Lua script path; input is scriptPath and output is parsed ScriptValues + error text.
         ScriptValues scriptValues;
 
         if (!std::filesystem::exists(scriptPath)) {
@@ -102,7 +106,7 @@ public:
             return scriptValues;
         }
 
-        luaGetGlobal(luaState, "render_distance");
+        luaGetGlobal(luaState, "Render_distance");
         if (luaType(luaState, -1) == luaTNumber) {
             int isNumber = 0;
             const long long value = luaToIntegerX(luaState, -1, &isNumber);
@@ -112,7 +116,7 @@ public:
         }
         luaSetTop(luaState, -2);
 
-        luaGetGlobal(luaState, "noise_intensity");
+        luaGetGlobal(luaState, "Noise_intensity");
         if (luaType(luaState, -1) == luaTNumber) {
             int isNumber = 0;
             const double value = luaToNumberX(luaState, -1, &isNumber);
@@ -122,7 +126,7 @@ public:
         }
         luaSetTop(luaState, -2);
 
-        luaGetGlobal(luaState, "terrain_seed");
+        luaGetGlobal(luaState, "Terrain_seed");
         if (luaType(luaState, -1) == luaTNumber) {
             int isNumber = 0;
             const long long value = luaToIntegerX(luaState, -1, &isNumber);
@@ -144,10 +148,16 @@ public:
     }
 
 private:
+    /**
+     * Reads the current Lua error string from the Lua stack.
+     * @param luaState Active Lua state.
+     * @param luaToLString Lua callback used to read string data.
+     * @param luaSetTop Lua callback used to pop stack entries.
+     * @return Normalized Lua error message text.
+     */
     static std::string readLuaError(lua_State* luaState,
                                     const char* (__cdecl* luaToLString)(lua_State*, int, size_t*),
                                     void (__cdecl* luaSetTop)(lua_State*, int)) {
-        // Reads top-of-stack Lua error text using provided Lua API callbacks; returns a normalized error string.
         size_t messageLength = 0;
         const char* rawMessage = luaToLString(luaState, -1, &messageLength);
         std::string message = "Unknown Lua error.";
@@ -158,8 +168,11 @@ private:
         return message;
     }
 
+    /**
+     * Attempts to load a supported Lua runtime DLL.
+     * @return Loaded module handle, or nullptr when no supported DLL is found.
+     */
     static HMODULE loadLuaModule() {
-        // Tries known Lua DLL names in order and returns loaded module handle or nullptr.
         constexpr const char* moduleCandidates[] = {
             "lua54.dll",
             "lua53.dll",
@@ -189,8 +202,12 @@ public:
         std::string errorMessage;
     };
 
+    /**
+     * Non-Windows fallback that returns default script values.
+     * @param Unused script path.
+     * @return Empty script values.
+     */
     static ScriptValues loadScript(const std::filesystem::path&) {
-        // Non-Windows fallback loader that returns empty ScriptValues; takes script path and returns defaults.
         return {};
     }
 };

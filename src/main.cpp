@@ -7,10 +7,18 @@
 #include <stdexcept>
 
 // Forward declaration for setting executable directory
+/**
+ * Stores executable directory used for runtime asset lookup.
+ * @param path Absolute or relative executable directory path.
+ * @return No return value.
+ */
 void setExecutableDirectory(const std::filesystem::path& path);
 
+/**
+ * Initializes GLFW and creates the Vulkan-compatible window.
+ * @return Created GLFW window handle, or nullptr on failure.
+ */
 GLFWwindow* InitialiseWindow() {
-    // Initializes GLFW and creates the Vulkan-compatible window; takes no inputs and returns window handle or nullptr.
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW\n";
         return nullptr;
@@ -30,8 +38,13 @@ GLFWwindow* InitialiseWindow() {
     return window;
 }
 
+/**
+ * Application entry point that initializes, runs, and shuts down the engine.
+ * @param argc Number of command-line arguments.
+ * @param argv Command-line argument array.
+ * @return Process exit code (`EXIT_SUCCESS` or `EXIT_FAILURE`).
+ */
 int main(int argc, char** argv) {
-    // Program entry point that initializes app, runs render loop, and handles shutdown; inputs argc/argv and returns exit code.
     if (argc > 0 && argv != nullptr && argv[0] != nullptr) {
         try {
             auto executableDir = std::filesystem::absolute(std::filesystem::path(argv[0])).parent_path();

@@ -1,6 +1,3 @@
--- Terrain script loaded at startup by VulkanApp
--- Adjust these values and restart the app to apply changes.
-
 -- Chunk render distance (minimum in app: 2)
 Render_distance = 32
 

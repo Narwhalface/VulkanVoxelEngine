@@ -116,6 +116,7 @@ private:
         VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
         VkBuffer indexBuffer = VK_NULL_HANDLE;
         VkDeviceMemory indexBufferMemory = VK_NULL_HANDLE;
+        uint32_t vertexCount = 0;
         uint32_t indexCount = 0;
         glm::vec3 minCorner{0.0f};
         glm::vec3 maxCorner{0.0f};
@@ -531,8 +532,8 @@ private:
     std::vector<Vertex> voxelVertices;
     std::vector<uint32_t> voxelIndices;
     static constexpr int kChunkUploadsPerFrame = 12;
-    static constexpr int kPrefetchRadiusExtra = 3;
-    static constexpr int kKeepRadiusExtra = 5;
+    static constexpr int kPrefetchRadiusExtra = 2;
+    static constexpr int kKeepRadiusExtra = 3;
     static constexpr uint32_t kGenerationWorkerCount = 2;
     static constexpr uint32_t kMeshingWorkerCount = 2;
     static constexpr size_t kMaxCompletedChunkMeshes = 128;

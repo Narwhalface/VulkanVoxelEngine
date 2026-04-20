@@ -1,4 +1,4 @@
-#include "VulkanApp.hpp"
+﻿#include "VulkanApp.hpp"
 #include "LuaTerrainScriptBridge.hpp"
 
 #include <algorithm>
@@ -31,9 +31,15 @@
 namespace {
 std::filesystem::path gExecutableDir;
 constexpr int kChunkSize = Chunk::SIZE;
+constexpr bool kEmitBottomFaces = false;
+constexpr bool kEmitWaterSideAndBottomFaces = false;
 
+/**
+ * What: Divides value by divisor with floor semantics for negatives; returns the floored quotient.
+ * In: Function parameters.
+ * Out: Function return value.
+ */
 int floorDiv(int value, int divisor) noexcept {
-    // Divides value by divisor with floor semantics for negatives; returns the floored quotient.
     // Performs mathematical floor division so negative coordinates map to the expected chunk.
     int quotient = value / divisor;
     const int remainder = value % divisor;
@@ -57,8 +63,12 @@ const std::array<FaceDefinition, 6> gFaceDefinitions = {{
     {{0, 1, 0}, {glm::vec3{0.0f, 1.0f, 0.0f}, glm::vec3{0.0f, 1.0f, 1.0f}, glm::vec3{1.0f, 1.0f, 1.0f}, glm::vec3{1.0f, 1.0f, 0.0f}}}
 }};
 
+/**
+ * What: Maps voxel type and face normal to an RGB color; returns the selected base color.
+ * In: Function parameters.
+ * Out: Function return value.
+ */
 glm::vec3 voxelBaseColor(uint8_t type, const glm::ivec3& normal) {
-    // Maps voxel type and face normal to an RGB color; returns the selected base color.
     // Chooses a base albedo by voxel type, with directional tinting for grass faces.
     switch (type) {
         case 2:
@@ -77,8 +87,12 @@ glm::vec3 voxelBaseColor(uint8_t type, const glm::ivec3& normal) {
     }
 }
 
+/**
+ * What: Computes directional shading from a face normal; returns a brightness multiplier.
+ * In: Function parameters.
+ * Out: Floating-point value.
+ */
 float shadeForNormal(const glm::ivec3& normal) {
-    // Computes directional shading from a face normal; returns a brightness multiplier.
     // Returns a simple face-lighting factor based on axis orientation.
     if (normal.y > 0) {
         return 1.0f;
@@ -93,8 +107,12 @@ float shadeForNormal(const glm::ivec3& normal) {
 }
 }
 
+/**
+ * What: Builds the vertex binding layout for Vertex data; returns Vulkan binding metadata.
+ * In: Function parameters.
+ * Out: Function return value.
+ */
 VkVertexInputBindingDescription Vertex::getBindingDescription() {
-    // Builds the vertex binding layout for Vertex data; returns Vulkan binding metadata.
     VkVertexInputBindingDescription bindingDescription{};
     bindingDescription.binding   = 0;
     bindingDescription.stride    = sizeof(Vertex);
@@ -102,8 +120,12 @@ VkVertexInputBindingDescription Vertex::getBindingDescription() {
     return bindingDescription;
 }
 
+/**
+ * What: Builds position/color vertex attributes; returns two Vulkan attribute descriptions.
+ * In: Function parameters.
+ * Out: Function return value.
+ */
 std::array<VkVertexInputAttributeDescription, 2> Vertex::getAttributeDescriptions() {
-    // Builds position/color vertex attributes; returns two Vulkan attribute descriptions.
     std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
 
     attributeDescriptions[0].binding  = 0;
@@ -119,8 +141,12 @@ std::array<VkVertexInputAttributeDescription, 2> Vertex::getAttributeDescription
     return attributeDescriptions;
 }
 
+/**
+ * What: Resolves a relative asset path against known roots; returns the first existing path or input.
+ * In: Function parameters.
+ * Out: Function return value.
+ */
 static std::filesystem::path resolveAssetPath(const std::filesystem::path& relative) {
-    // Resolves a relative asset path against known roots; returns the first existing path or input.
     // Searches upward from current and executable directories to find an existing asset path.
     std::vector<std::filesystem::path> roots;
     auto registerRoots = [&roots](const std::filesystem::path& source) {
@@ -156,8 +182,12 @@ static std::filesystem::path resolveAssetPath(const std::filesystem::path& relat
     return relative;
 }
 
+/**
+ * What: Reads a binary file into memory using an asset-relative filename; returns raw file bytes.
+ * In: Function parameters.
+ * Out: Function return value.
+ */
 static std::vector<char> readfile(const std::string& filename) {
-    // Reads a binary file into memory using an asset-relative filename; returns raw file bytes.
     // Loads a binary file into memory (used for SPIR-V shader blobs).
     const auto assetPath = resolveAssetPath(filename);
 
@@ -175,21 +205,33 @@ static std::vector<char> readfile(const std::string& filename) {
     return buffer;
 }
 
+/**
+ * What: Sets executable directory used by asset lookup; takes a filesystem path and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void setExecutableDirectory(const std::filesystem::path& path) {
-    // Sets executable directory used by asset lookup; takes a filesystem path and returns nothing.
     // Stores the executable directory so runtime asset lookup can resolve relative paths.
     gExecutableDir = path;
 }
 
+/**
+ * What: Initializes app state from a GLFW window handle and validation flag; constructs a VulkanApp instance.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 VulkanApp::VulkanApp(GLFWwindow* window, bool enableValidation)
-// Initializes app state from a GLFW window handle and validation flag; constructs a VulkanApp instance.
     : windowRef(window),
       enableValidationLayers(enableValidation),
       validationLayers({"VK_LAYER_KHRONOS_validation"}),
       deviceExtensions({VK_KHR_SWAPCHAIN_EXTENSION_NAME}) {}
 
+/**
+ * What: Initializes Vulkan, terrain, threading, and camera systems; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::initialize() {
-    // Initializes Vulkan, terrain, threading, and camera systems; takes no args and returns nothing.
     createInstance();
     createSurface();
     pickPhysicalDevice();
@@ -222,7 +264,21 @@ void VulkanApp::initialize() {
     }
 
     if (scriptValues.renderDistanceChunks.has_value()) {
-        const int clampedDistance = (std::max)(2, *scriptValues.renderDistanceChunks);
+        constexpr int kMinRenderDistanceChunks = 2;
+        constexpr int kMaxRenderDistanceChunks = 32;
+        const int clampedDistance = (std::clamp)(
+            *scriptValues.renderDistanceChunks,
+            kMinRenderDistanceChunks,
+            kMaxRenderDistanceChunks
+        );
+        if (clampedDistance != *scriptValues.renderDistanceChunks) {
+            std::cout
+                << "Render distance clamped from "
+                << *scriptValues.renderDistanceChunks
+                << " to "
+                << clampedDistance
+                << " chunks for performance.\n";
+        }
         renderDistanceChunks.store(clampedDistance, std::memory_order_relaxed);
     }
 
@@ -291,8 +347,12 @@ void VulkanApp::initialize() {
     lastFrameTimeSeconds = glfwGetTime();
 }
 
+/**
+ * What: Stops workers and releases Vulkan resources in shutdown order; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::cleanup() {
-    // Stops workers and releases Vulkan resources in shutdown order; takes no args and returns nothing.
     chunkWorkerRunning.store(false, std::memory_order_relaxed);
     generationQueueCv.notify_all();
     meshQueueCv.notify_all();
@@ -389,8 +449,12 @@ void VulkanApp::cleanup() {
 
 }
 
+/**
+ * What: Creates the Vulkan instance with required extensions/layers; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createInstance() {
-    // Creates the Vulkan instance with required extensions/layers; takes no args and returns nothing.
     if (enableValidationLayers && !checkValidationLayerSupport()) {
         throw std::runtime_error("Validation layers requested, but not available");
     }
@@ -428,8 +492,12 @@ void VulkanApp::createInstance() {
     std::cout << "Vulkan instance created\n";
 }
 
+/**
+ * What: Checks whether requested validation layers are present; returns true when all are available.
+ * In: Function parameters.
+ * Out: Boolean result.
+ */
 bool VulkanApp::checkValidationLayerSupport() const {
-    // Checks whether requested validation layers are present; returns true when all are available.
     uint32_t layerCount = 0;
     vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
     std::vector<VkLayerProperties> availableLayers(layerCount);
@@ -452,8 +520,12 @@ bool VulkanApp::checkValidationLayerSupport() const {
     return true;
 }
 
+/**
+ * What: Creates a Vulkan surface from the GLFW window; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createSurface() {
-    // Creates a Vulkan surface from the GLFW window; takes no args and returns nothing.
     if (glfwCreateWindowSurface(instance, windowRef, nullptr, &surface) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create window surface");
     }
@@ -461,8 +533,12 @@ void VulkanApp::createSurface() {
     std::cout << "Window surface created\n";
 }
 
+/**
+ * What: Selects the first suitable physical device and queue families; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::pickPhysicalDevice() {
-    // Selects the first suitable physical device and queue families; takes no args and returns nothing.
     uint32_t deviceCount = 0;
     if (vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr) != VK_SUCCESS || deviceCount == 0) {
         throw std::runtime_error("Failed to find GPUs with Vulkan support");
@@ -491,8 +567,12 @@ void VulkanApp::pickPhysicalDevice() {
     std::cout << "Graphics queue family index: " << selectedQueues.graphicsFamily << "\n";
 }
 
+/**
+ * What: Evaluates a candidate GPU for required queues/extensions/swapchain; returns suitability.
+ * In: Function parameters.
+ * Out: Boolean result.
+ */
 bool VulkanApp::isDeviceSuitable(VkPhysicalDevice candidate) const {
-    // Evaluates a candidate GPU for required queues/extensions/swapchain; returns suitability.
     QueueFamilyIndices indices = findQueueFamilies(candidate);
     bool extensionsSupported   = checkDeviceExtensionSupport(candidate);
 
@@ -505,8 +585,12 @@ bool VulkanApp::isDeviceSuitable(VkPhysicalDevice candidate) const {
     return indices.isComplete() && extensionsSupported && swapchainAdequate;
 }
 
+/**
+ * What: Finds graphics and present queue families on a device; returns discovered family indices.
+ * In: Function parameters.
+ * Out: Function return value.
+ */
 VulkanApp::QueueFamilyIndices VulkanApp::findQueueFamilies(VkPhysicalDevice candidate) const {
-    // Finds graphics and present queue families on a device; returns discovered family indices.
     QueueFamilyIndices indices;
 
     uint32_t queueFamilyCount = 0;
@@ -533,8 +617,12 @@ VulkanApp::QueueFamilyIndices VulkanApp::findQueueFamilies(VkPhysicalDevice cand
     return indices;
 }
 
+/**
+ * What: Verifies required device extensions for a GPU; returns true when all are supported.
+ * In: Function parameters.
+ * Out: Boolean result.
+ */
 bool VulkanApp::checkDeviceExtensionSupport(VkPhysicalDevice candidate) const {
-    // Verifies required device extensions for a GPU; returns true when all are supported.
     uint32_t extensionCount = 0;
     vkEnumerateDeviceExtensionProperties(candidate, nullptr, &extensionCount, nullptr);
 
@@ -549,8 +637,12 @@ bool VulkanApp::checkDeviceExtensionSupport(VkPhysicalDevice candidate) const {
     return required.empty();
 }
 
+/**
+ * What: Creates logical device and retrieves graphics/present queues; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createLogicalDevice() {
-    // Creates logical device and retrieves graphics/present queues; takes no args and returns nothing.
     std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
     std::set<uint32_t> uniqueFamilies = {
         selectedQueues.graphicsFamily,
@@ -595,8 +687,12 @@ void VulkanApp::createLogicalDevice() {
     std::cout << "Logical device and graphics queue created\n";
 }
 
+/**
+ * What: Queries swapchain capabilities, formats, and present modes for a device; returns support details.
+ * In: Function parameters.
+ * Out: Function return value.
+ */
 VulkanApp::SwapChainSupportDetails VulkanApp::querySwapChainSupport(VkPhysicalDevice candidate) const {
-    // Queries swapchain capabilities, formats, and present modes for a device; returns support details.
     SwapChainSupportDetails details{};
 
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(candidate, surface, &details.capabilities);
@@ -618,8 +714,12 @@ VulkanApp::SwapChainSupportDetails VulkanApp::querySwapChainSupport(VkPhysicalDe
     return details;
 }
 
+/**
+ * What: Chooses a preferred surface format from available formats; returns selected format.
+ * In: Function parameters.
+ * Out: Function return value.
+ */
 VkSurfaceFormatKHR VulkanApp::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats) const {
-    // Chooses a preferred surface format from available formats; returns selected format.
     for (const auto& format : formats) {
         if (format.format == VK_FORMAT_B8G8R8A8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             return format;
@@ -629,8 +729,12 @@ VkSurfaceFormatKHR VulkanApp::chooseSwapSurfaceFormat(const std::vector<VkSurfac
     return formats.empty() ? VkSurfaceFormatKHR{} : formats[0];
 }
 
+/**
+ * What: Chooses a presentation mode from available modes; returns selected present mode.
+ * In: Function parameters.
+ * Out: Function return value.
+ */
 VkPresentModeKHR VulkanApp::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& presentModes) const {
-    // Chooses a presentation mode from available modes; returns selected present mode.
     for (VkPresentModeKHR mode : presentModes) {
         if (mode == VK_PRESENT_MODE_FIFO_KHR) {
             return mode;
@@ -640,8 +744,12 @@ VkPresentModeKHR VulkanApp::chooseSwapPresentMode(const std::vector<VkPresentMod
     return presentModes.empty() ? VK_PRESENT_MODE_FIFO_KHR : presentModes.front();
 }
 
+/**
+ * What: Chooses swap extent using surface capabilities and framebuffer size; returns chosen extent.
+ * In: Function parameters.
+ * Out: Function return value.
+ */
 VkExtent2D VulkanApp::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) const {
-    // Chooses swap extent using surface capabilities and framebuffer size; returns chosen extent.
     if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
         return capabilities.currentExtent;
     }
@@ -661,8 +769,12 @@ VkExtent2D VulkanApp::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilit
     return actualExtent;
 }
 
+/**
+ * What: Creates swapchain and stores images/format/extent; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createSwapchain() {
-    // Creates swapchain and stores images/format/extent; takes no args and returns nothing.
     SwapChainSupportDetails support = querySwapChainSupport(physicalDevice);
 
     VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(support.formats);
@@ -717,8 +829,12 @@ void VulkanApp::createSwapchain() {
     std::cout << "Swapchain created\n";
 }
 
+/**
+ * What: Creates image views for each swapchain image; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createImageViews() {
-    // Creates image views for each swapchain image; takes no args and returns nothing.
     swapchainImageViews.resize(swapchainImages.size());
 
     for (size_t i = 0; i < swapchainImages.size(); ++i) {
@@ -726,8 +842,12 @@ void VulkanApp::createImageViews() {
     }
 }
 
+/**
+ * What: Creates a shader module from SPIR-V bytes for a device; returns shader module handle.
+ * In: Function parameters.
+ * Out: Vulkan shader module handle.
+ */
 VkShaderModule VulkanApp::createShaderModule(VkDevice device, const std::vector<char>& code) {
-    // Creates a shader module from SPIR-V bytes for a device; returns shader module handle.
     VkShaderModuleCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = code.size();
@@ -741,8 +861,12 @@ VkShaderModule VulkanApp::createShaderModule(VkDevice device, const std::vector<
     return shaderModule;
 }
 
+/**
+ * What: Creates descriptor set layout for uniform bindings; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createDescriptorSetLayout() {
-    // Creates descriptor set layout for uniform bindings; takes no args and returns nothing.
     VkDescriptorSetLayoutBinding uboLayoutBinding{};
     uboLayoutBinding.binding            = 0;
     uboLayoutBinding.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -760,8 +884,12 @@ void VulkanApp::createDescriptorSetLayout() {
     }
 }
 
+/**
+ * What: Creates descriptor pool sized for frames in flight; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createDescriptorPool() {
-    // Creates descriptor pool sized for frames in flight; takes no args and returns nothing.
     VkDescriptorPoolSize poolSize{};
     poolSize.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
@@ -777,8 +905,12 @@ void VulkanApp::createDescriptorPool() {
     }
 }
 
+/**
+ * What: Allocates and writes descriptor sets for uniform buffers; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createDescriptorSets() {
-    // Allocates and writes descriptor sets for uniform buffers; takes no args and returns nothing.
     std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
 
     VkDescriptorSetAllocateInfo allocInfo{};
@@ -811,8 +943,12 @@ void VulkanApp::createDescriptorSets() {
     }
 }
 
+/**
+ * What: Creates shader stages, pipeline layout, and graphics pipeline state; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createGraphicsPipeline() {
-    // Creates shader stages, pipeline layout, and graphics pipeline state; takes no args and returns nothing.
     auto vertShaderCode = readfile("shaders/voxel.vert.spv");
     auto fragShaderCode = readfile("shaders/voxel.frag.spv");
 
@@ -961,8 +1097,12 @@ void VulkanApp::createGraphicsPipeline() {
     vkDestroyShaderModule(device, fragShaderModule, nullptr);
 }
 
+/**
+ * What: Creates color/depth render pass attachments and subpass; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createRenderPass() {
-    // Creates color/depth render pass attachments and subpass; takes no args and returns nothing.
 
     if (depthImageFormat == VK_FORMAT_UNDEFINED) {
         depthImageFormat = findDepthFormat();
@@ -1028,14 +1168,22 @@ void VulkanApp::createRenderPass() {
     }
 }
 
+/**
+ * What: GLFW resize callback that marks swapchain recreation state; takes window/size and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::framebufferResizeCallback(GLFWwindow* window, int width, int height) {
-    // GLFW resize callback that marks swapchain recreation state; takes window/size and returns nothing.
     auto app = reinterpret_cast<VulkanApp*>(glfwGetWindowUserPointer(window));
     app->framebufferResized = true;
 }
 
+/**
+ * What: Creates framebuffer objects for each swapchain image view; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createFramebuffers() {
-    // Creates framebuffer objects for each swapchain image view; takes no args and returns nothing.
     swapchainFramebuffers.resize(swapchainImageViews.size());
 
     for (size_t i = 0; i < swapchainImageViews.size(); ++i) {
@@ -1061,8 +1209,12 @@ void VulkanApp::createFramebuffers() {
     }
 }
 
+/**
+ * What: Creates the graphics command pool used for command buffers; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createCommandPool() {
-    // Creates the graphics command pool used for command buffers; takes no args and returns nothing.
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -1075,8 +1227,12 @@ void VulkanApp::createCommandPool() {
     }
 }
 
+/**
+ * What: Creates a Vulkan buffer from size/usage/properties and outputs buffer + memory handles.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
-    // Creates a Vulkan buffer from size/usage/properties and outputs buffer + memory handles.
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size        = size;
@@ -1102,8 +1258,12 @@ void VulkanApp::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemo
     vkBindBufferMemory(device, buffer, bufferMemory, 0);
 }
 
+/**
+ * What: Creates an image with given dimensions/format/usage and outputs image + memory handles.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
-    // Creates an image with given dimensions/format/usage and outputs image + memory handles.
     VkImageCreateInfo imageInfo{};
     imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType     = VK_IMAGE_TYPE_2D;
@@ -1138,8 +1298,12 @@ void VulkanApp::createImage(uint32_t width, uint32_t height, VkFormat format, Vk
     vkBindImageMemory(device, image, imageMemory, 0);
 }
 
+/**
+ * What: Creates an image view for an image/aspect combination; returns created image view handle.
+ * In: Function parameters.
+ * Out: Vulkan format value.
+ */
 VkImageView VulkanApp::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) {
-    // Creates an image view for an image/aspect combination; returns created image view handle.
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image                           = image;
@@ -1163,9 +1327,12 @@ VkImageView VulkanApp::createImageView(VkImage image, VkFormat format, VkImageAs
     return imageView;
 }
 
+/**
+ * What: Builds full CPU voxel mesh around current center chunk; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::buildVoxelMesh() {
-    // Builds full CPU voxel mesh around current center chunk; takes no args and returns nothing.
-    constexpr int chunkSize = Chunk::SIZE;
     const int chunkRadius = renderDistanceChunks.load(std::memory_order_relaxed);
     const ChunkCoord centerChunk = requestedTerrainCenterChunk;
 
@@ -1189,130 +1356,32 @@ void VulkanApp::buildVoxelMesh() {
     auto endLoadTime = std::chrono::high_resolution_clock::now();
     auto loadDuration = std::chrono::duration_cast<std::chrono::milliseconds>(endLoadTime - startLoadTime).count();
 
-    // Pre-reserve space to reduce allocations
-    const int totalChunks = chunkCoords.size();
-    const int estimatedVerticesPerChunk = 24 * 16 * 16;  // Heuristic based on avg exposed faces
-    voxelVertices.reserve(totalChunks * estimatedVerticesPerChunk);
-    voxelIndices.reserve(totalChunks * estimatedVerticesPerChunk * 2);
+    const int totalChunks = static_cast<int>(chunkCoords.size());
+    const int estimatedVerticesPerChunk = 24 * 16 * 16;
+    voxelVertices.reserve(static_cast<size_t>(totalChunks) * static_cast<size_t>(estimatedVerticesPerChunk));
+    voxelIndices.reserve(static_cast<size_t>(totalChunks) * static_cast<size_t>(estimatedVerticesPerChunk * 2));
 
-    glm::vec3 minCorner((std::numeric_limits<float>::max)());
-    glm::vec3 maxCorner(std::numeric_limits<float>::lowest());
-
-    // Build mesh for each chunk (now thread-safe - chunks are pre-loaded)
-    // Cap to 4 threads to reduce CPU spike while maintaining good parallelism
+    // Use the same greedy meshing path as streaming chunk uploads for consistency.
     const size_t numThreads = std::min(4U, std::max(1U, std::thread::hardware_concurrency()));
     const size_t chunksPerThread = (chunkCoords.size() + numThreads - 1) / numThreads;
 
     auto startMeshTime = std::chrono::high_resolution_clock::now();
 
-    std::vector<std::pair<std::vector<Vertex>, std::vector<uint32_t>>> threadMeshes(numThreads);
-    std::vector<std::pair<glm::vec3, glm::vec3>> threadBounds(numThreads, {
-        glm::vec3((std::numeric_limits<float>::max)()),
-        glm::vec3(std::numeric_limits<float>::lowest())
-    });
+    std::vector<std::vector<PendingChunkMesh>> threadChunkMeshes(numThreads);
 
     std::vector<std::thread> threads;
     for (size_t t = 0; t < numThreads; ++t) {
         threads.emplace_back([&, t]() {
             size_t startIdx = t * chunksPerThread;
             size_t endIdx = std::min(startIdx + chunksPerThread, chunkCoords.size());
-            
-            auto& threadVertices = threadMeshes[t].first;
-            auto& threadIndices = threadMeshes[t].second;
-            threadVertices.reserve(estimatedVerticesPerChunk * chunksPerThread);
-            threadIndices.reserve(estimatedVerticesPerChunk * 2 * chunksPerThread);
+            auto& threadResults = threadChunkMeshes[t];
+            threadResults.reserve(endIdx > startIdx ? (endIdx - startIdx) : 0);
 
             for (size_t i = startIdx; i < endIdx; ++i) {
                 const ChunkCoord coord = chunkCoords[i];
-                const Chunk* chunk = world.findChunk(coord);
-                if (!chunk) continue;
-
-                const Chunk* neighborXN = world.findChunk({coord.x - 1, coord.y, coord.z});
-                const Chunk* neighborXP = world.findChunk({coord.x + 1, coord.y, coord.z});
-                const Chunk* neighborYN = world.findChunk({coord.x, coord.y - 1, coord.z});
-                const Chunk* neighborYP = world.findChunk({coord.x, coord.y + 1, coord.z});
-                const Chunk* neighborZN = world.findChunk({coord.x, coord.y, coord.z - 1});
-                const Chunk* neighborZP = world.findChunk({coord.x, coord.y, coord.z + 1});
-
-                const int baseX = coord.x * chunkSize;
-                const int baseY = coord.y * chunkSize;
-                const int baseZ = coord.z * chunkSize;
-
-                const auto isNeighborSolid = [&](int nx, int ny, int nz) {
-                    if (nx >= 0 && nx < chunkSize && ny >= 0 && ny < chunkSize && nz >= 0 && nz < chunkSize) {
-                        return chunk->at(nx, ny, nz).isSolid();
-                    }
-
-                    const Chunk* neighborChunk = nullptr;
-                    int sampleX = nx;
-                    int sampleY = ny;
-                    int sampleZ = nz;
-
-                    if (nx < 0) {
-                        neighborChunk = neighborXN;
-                        sampleX += chunkSize;
-                    } else if (nx >= chunkSize) {
-                        neighborChunk = neighborXP;
-                        sampleX -= chunkSize;
-                    } else if (ny < 0) {
-                        neighborChunk = neighborYN;
-                        sampleY += chunkSize;
-                    } else if (ny >= chunkSize) {
-                        neighborChunk = neighborYP;
-                        sampleY -= chunkSize;
-                    } else if (nz < 0) {
-                        neighborChunk = neighborZN;
-                        sampleZ += chunkSize;
-                    } else {
-                        neighborChunk = neighborZP;
-                        sampleZ -= chunkSize;
-                    }
-
-                    return neighborChunk != nullptr && neighborChunk->at(sampleX, sampleY, sampleZ).isSolid();
-                };
-
-                for (int localZ = 0; localZ < chunkSize; ++localZ) {
-                    for (int localY = 0; localY < chunkSize; ++localY) {
-                        for (int localX = 0; localX < chunkSize; ++localX) {
-                            const Voxel& voxel = chunk->at(localX, localY, localZ);
-                            if (!voxel.isSolid()) {
-                                continue;
-                            }
-
-                            const int worldX = baseX + localX;
-                            const int worldY = baseY + localY;
-                            const int worldZ = baseZ + localZ;
-                            const glm::vec3 basePosition(static_cast<float>(worldX), static_cast<float>(worldY), static_cast<float>(worldZ));
-
-                            for (const auto& face : gFaceDefinitions) {
-                                const int nx = localX + face.normal.x;
-                                const int ny = localY + face.normal.y;
-                                const int nz = localZ + face.normal.z;
-                                if (isNeighborSolid(nx, ny, nz)) {
-                                    continue;
-                                }
-
-                                const glm::vec3 baseColour = voxelBaseColor(voxel.type, face.normal);
-                                const float shade = shadeForNormal(face.normal);
-                                const glm::vec3 colour = glm::clamp(baseColour * shade, glm::vec3(0.0f), glm::vec3(1.0f));
-                                const uint32_t startIndex = static_cast<uint32_t>(threadVertices.size());
-
-                                for (const auto& corner : face.corners) {
-                                    const glm::vec3 position = basePosition + corner;
-                                    threadVertices.push_back(Vertex{position, colour});
-                                    threadBounds[t].first = (glm::min)(threadBounds[t].first, position);
-                                    threadBounds[t].second = (glm::max)(threadBounds[t].second, position);
-                                }
-
-                                threadIndices.push_back(startIndex);
-                                threadIndices.push_back(startIndex + 1);
-                                threadIndices.push_back(startIndex + 2);
-                                threadIndices.push_back(startIndex);
-                                threadIndices.push_back(startIndex + 2);
-                                threadIndices.push_back(startIndex + 3);
-                            }
-                        }
-                    }
+                PendingChunkMesh chunkMesh = buildChunkMeshData(coord);
+                if (chunkMesh.hasGeometry) {
+                    threadResults.push_back(std::move(chunkMesh));
                 }
             }
         });
@@ -1326,24 +1395,25 @@ void VulkanApp::buildVoxelMesh() {
     auto endMeshTime = std::chrono::high_resolution_clock::now();
     auto meshDuration = std::chrono::duration_cast<std::chrono::milliseconds>(endMeshTime - startMeshTime).count();
 
-    // Merge all thread meshes
+    glm::vec3 minCorner((std::numeric_limits<float>::max)());
+    glm::vec3 maxCorner(std::numeric_limits<float>::lowest());
+    bool hasGeometry = false;
+
     uint32_t vertexOffset = 0;
     for (size_t t = 0; t < numThreads; ++t) {
-        const auto& threadVerts = threadMeshes[t].first;
-        const auto& threadInds = threadMeshes[t].second;
-
-        voxelVertices.insert(voxelVertices.end(), threadVerts.begin(), threadVerts.end());
-        
-        for (uint32_t idx : threadInds) {
-            voxelIndices.push_back(idx + vertexOffset);
+        for (const PendingChunkMesh& chunkMesh : threadChunkMeshes[t]) {
+            voxelVertices.insert(voxelVertices.end(), chunkMesh.vertices.begin(), chunkMesh.vertices.end());
+            for (uint32_t idx : chunkMesh.indices) {
+                voxelIndices.push_back(idx + vertexOffset);
+            }
+            vertexOffset += static_cast<uint32_t>(chunkMesh.vertices.size());
+            minCorner = (glm::min)(minCorner, chunkMesh.minCorner);
+            maxCorner = (glm::max)(maxCorner, chunkMesh.maxCorner);
+            hasGeometry = true;
         }
-
-        vertexOffset += static_cast<uint32_t>(threadVerts.size());
-        minCorner = (glm::min)(minCorner, threadBounds[t].first);
-        maxCorner = (glm::max)(maxCorner, threadBounds[t].second);
     }
 
-    if (!voxelVertices.empty()) {
+    if (hasGeometry) {
         meshCenter = (minCorner + maxCorner) * 0.5f;
         meshRadius = glm::length(maxCorner - meshCenter);
         meshRadius = std::max(meshRadius, 1.0f);
@@ -1352,11 +1422,15 @@ void VulkanApp::buildVoxelMesh() {
         meshRadius = 1.0f;
     }
 
-    std::cout << "Terrain generation timing: " << loadDuration << "ms (load chunks) + " << meshDuration << "ms (parallel mesh build)\n";
+    std::cout << "Greedy mesh generation timing: " << loadDuration << "ms (load chunks) + " << meshDuration << "ms (parallel mesh build)\n";
 }
 
+/**
+ * What: Uploads voxelVertices into GPU vertex buffer resources; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createVertexBuffer() {
-    // Uploads voxelVertices into GPU vertex buffer resources; takes no args and returns nothing.
     if (voxelVertices.empty()) {
         std::cerr << "Warning: Creating vertex buffer with no vertices\n";
         return;
@@ -1380,8 +1454,12 @@ void VulkanApp::createVertexBuffer() {
     vkFreeMemory(device, stagingBufferMemory, nullptr);
 }
 
+/**
+ * What: Uploads voxelIndices into GPU index buffer resources; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createIndexBuffer() {
-    // Uploads voxelIndices into GPU index buffer resources; takes no args and returns nothing.
     if (voxelIndices.empty()) {
         std::cerr << "Warning: Creating index buffer with no indices\n";
         return;
@@ -1405,8 +1483,12 @@ void VulkanApp::createIndexBuffer() {
     vkFreeMemory(device, stagingBufferMemory, nullptr);
 }
 
+/**
+ * What: Allocates and maps per-frame uniform buffers; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createUniformBuffers() {
-    // Allocates and maps per-frame uniform buffers; takes no args and returns nothing.
     VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
     uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
@@ -1419,8 +1501,12 @@ void VulkanApp::createUniformBuffers() {
     }
 }
 
+/**
+ * What: Copies size bytes from srcBuffer to dstBuffer using one-time commands; returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
-    // Copies size bytes from srcBuffer to dstBuffer using one-time commands; returns nothing.
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -1468,8 +1554,12 @@ void VulkanApp::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize 
     vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
 }
 
+/**
+ * What: Finds a compatible memory type index matching filter/properties; returns memory type index.
+ * In: Function parameters.
+ * Out: 32-bit unsigned integer value.
+ */
 uint32_t VulkanApp::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
-    // Finds a compatible memory type index matching filter/properties; returns memory type index.
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
 
@@ -1482,8 +1572,12 @@ uint32_t VulkanApp::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags pr
     throw std::runtime_error("Failed to find suitable memory type");
 }
 
+/**
+ * What: Finds first candidate format supporting requested tiling/features; returns selected format.
+ * In: Function parameters.
+ * Out: Vulkan format value.
+ */
 VkFormat VulkanApp::findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) const {
-    // Finds first candidate format supporting requested tiling/features; returns selected format.
     for (VkFormat format : candidates) {
         VkFormatProperties props;
         vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
@@ -1500,21 +1594,33 @@ VkFormat VulkanApp::findSupportedFormat(const std::vector<VkFormat>& candidates,
     throw std::runtime_error("Failed to find supported format");
 }
 
+/**
+ * What: Selects a supported depth format from preferred candidates; returns depth-capable format.
+ * In: Function parameters.
+ * Out: Vulkan format value.
+ */
 VkFormat VulkanApp::findDepthFormat() const {
-    // Selects a supported depth format from preferred candidates; returns depth-capable format.
     return findSupportedFormat(
         {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
         VK_IMAGE_TILING_OPTIMAL,
         VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
 }
 
+/**
+ * What: Tests whether the provided depth format includes a stencil component; returns true/false.
+ * In: Function parameters.
+ * Out: Boolean result.
+ */
 bool VulkanApp::hasStencilComponent(VkFormat format) const {
-    // Tests whether the provided depth format includes a stencil component; returns true/false.
     return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
 }
 
+/**
+ * What: Creates depth images, memory, and views for swapchain images; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createDepthResources() {
-    // Creates depth images, memory, and views for swapchain images; takes no args and returns nothing.
     depthImageFormat = findDepthFormat();
 
     const size_t imageCount = swapchainImages.size();
@@ -1542,8 +1648,12 @@ void VulkanApp::createDepthResources() {
     }
 }
 
+/**
+ * What: Allocates primary command buffers for in-flight frames; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createCommandBuffers() {
-    // Allocates primary command buffers for in-flight frames; takes no args and returns nothing.
     commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1558,8 +1668,12 @@ void VulkanApp::createCommandBuffers() {
     }
 }
 
+/**
+ * What: Creates per-frame semaphores and fences for rendering sync; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::createSyncObjects() {
-    // Creates per-frame semaphores and fences for rendering sync; takes no args and returns nothing.
     imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
@@ -1580,8 +1694,12 @@ void VulkanApp::createSyncObjects() {
     }
 }
 
+/**
+ * What: Destroys all swapchain-dependent Vulkan resources and clears containers; returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::cleanupSwapChain() {
-    // Destroys all swapchain-dependent Vulkan resources and clears containers; returns nothing.
     for (auto framebuffer : swapchainFramebuffers) {
         if (framebuffer != VK_NULL_HANDLE) {
             vkDestroyFramebuffer(device, framebuffer, nullptr);
@@ -1641,8 +1759,12 @@ void VulkanApp::cleanupSwapChain() {
     depthImageFormat = VK_FORMAT_UNDEFINED;
 }
 
+/**
+ * What: Recreates swapchain resources after resize/minimize events; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::recreateSwapChain() {
-    // Recreates swapchain resources after resize/minimize events; takes no args and returns nothing.
     int width = 0;
     int height = 0;
     glfwGetFramebufferSize(windowRef, &width, &height);
@@ -1663,8 +1785,12 @@ void VulkanApp::recreateSwapChain() {
     createFramebuffers();
 }
 
+/**
+ * What: Updates model/view/projection data for current frame image; takes frame index and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::updateUniformBuffer(uint32_t currentImage) {
-    // Updates model/view/projection data for current frame image; takes frame index and returns nothing.
     UniformBufferObject ubo{};
     ubo.model = glm::mat4(1.0f);
 
@@ -1675,7 +1801,7 @@ void VulkanApp::updateUniformBuffer(uint32_t currentImage) {
     const float distanceToCenter = glm::length(camera.position() - meshCenter);
     const int activeRenderDistance = renderDistanceChunks.load(std::memory_order_relaxed);
     const float chunkExtent = static_cast<float>((activeRenderDistance + kKeepRadiusExtra + 2) * kChunkSize);
-    const float ringDiagonal = chunkExtent * 1.45f;
+    const float ringDiagonal = chunkExtent * std::sqrt(2.0f) + static_cast<float>(kChunkSize) * 2.0f;
     const float farPlaneFromDistance = distanceToCenter + ringDiagonal + 96.0f;
     const float farPlaneFromBounds = std::max(distanceToCenter + radius * 2.5f, radius * 5.0f);
     const float farPlane = std::max(farPlaneFromBounds, farPlaneFromDistance);
@@ -1687,21 +1813,32 @@ void VulkanApp::updateUniformBuffer(uint32_t currentImage) {
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
 
+/**
+ * What: Waits until device finishes all queued work; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::waitIdle() const {
-    // Waits until device finishes all queued work; takes no args and returns nothing.
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
     }
 }
+/**
+ * What: Requests terrain window refresh to trigger mesh rebuild; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::rebuildVoxelMesh() {
-    // Requests terrain window refresh to trigger mesh rebuild; takes no args and returns nothing.
     requestTerrainWindow(requestedTerrainCenterChunk);
 }
 
+/**
+ * What: Builds mesh data asynchronously into pending buffers; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::buildVoxelMeshAsync() {
-    // Builds mesh data asynchronously into pending buffers; takes no args and returns nothing.
     // Background thread function - builds mesh without blocking main thread
-    constexpr int chunkSize = Chunk::SIZE;
     const int chunkRadius = renderDistanceChunks.load(std::memory_order_relaxed);
     const ChunkCoord centerChunk = requestedTerrainCenterChunk;
 
@@ -1726,131 +1863,33 @@ void VulkanApp::buildVoxelMeshAsync() {
     auto endLoadTime = std::chrono::high_resolution_clock::now();
     auto loadDuration = std::chrono::duration_cast<std::chrono::milliseconds>(endLoadTime - startLoadTime).count();
 
-    // Pre-reserve space to reduce allocations
-    const int totalChunks = chunkCoords.size();
+    const int totalChunks = static_cast<int>(chunkCoords.size());
     totalChunksToLoad = totalChunks;
-    const int estimatedVerticesPerChunk = 24 * 16 * 16;  // Heuristic based on avg exposed faces
-    pendingVertices.reserve(totalChunks * estimatedVerticesPerChunk);
-    pendingIndices.reserve(totalChunks * estimatedVerticesPerChunk * 2);
+    const int estimatedVerticesPerChunk = 24 * 16 * 16;
+    pendingVertices.reserve(static_cast<size_t>(totalChunks) * static_cast<size_t>(estimatedVerticesPerChunk));
+    pendingIndices.reserve(static_cast<size_t>(totalChunks) * static_cast<size_t>(estimatedVerticesPerChunk * 2));
 
-    glm::vec3 minCorner((std::numeric_limits<float>::max)());
-    glm::vec3 maxCorner(std::numeric_limits<float>::lowest());
-
-    // Build mesh for each chunk (now thread-safe - chunks are pre-loaded)
-    // Cap to 4 threads to reduce CPU spike while maintaining good parallelism
+    // Use the same greedy meshing path as streaming chunk uploads for consistency.
     const size_t numThreads = std::min(4U, std::max(1U, std::thread::hardware_concurrency()));
     const size_t chunksPerThread = (chunkCoords.size() + numThreads - 1) / numThreads;
 
     auto startMeshTime = std::chrono::high_resolution_clock::now();
 
-    std::vector<std::pair<std::vector<Vertex>, std::vector<uint32_t>>> threadMeshes(numThreads);
-    std::vector<std::pair<glm::vec3, glm::vec3>> threadBounds(numThreads, {
-        glm::vec3((std::numeric_limits<float>::max)()),
-        glm::vec3(std::numeric_limits<float>::lowest())
-    });
+    std::vector<std::vector<PendingChunkMesh>> threadChunkMeshes(numThreads);
 
     std::vector<std::thread> threads;
     for (size_t t = 0; t < numThreads; ++t) {
         threads.emplace_back([&, t]() {
             size_t startIdx = t * chunksPerThread;
             size_t endIdx = std::min(startIdx + chunksPerThread, chunkCoords.size());
-            
-            auto& threadVertices = threadMeshes[t].first;
-            auto& threadIndices = threadMeshes[t].second;
-            threadVertices.reserve(estimatedVerticesPerChunk * chunksPerThread);
-            threadIndices.reserve(estimatedVerticesPerChunk * 2 * chunksPerThread);
+            auto& threadResults = threadChunkMeshes[t];
+            threadResults.reserve(endIdx > startIdx ? (endIdx - startIdx) : 0);
 
             for (size_t i = startIdx; i < endIdx; ++i) {
                 const ChunkCoord coord = chunkCoords[i];
-                const Chunk* chunk = world.findChunk(coord);
-                if (!chunk) continue;
-
-                const Chunk* neighborXN = world.findChunk({coord.x - 1, coord.y, coord.z});
-                const Chunk* neighborXP = world.findChunk({coord.x + 1, coord.y, coord.z});
-                const Chunk* neighborYN = world.findChunk({coord.x, coord.y - 1, coord.z});
-                const Chunk* neighborYP = world.findChunk({coord.x, coord.y + 1, coord.z});
-                const Chunk* neighborZN = world.findChunk({coord.x, coord.y, coord.z - 1});
-                const Chunk* neighborZP = world.findChunk({coord.x, coord.y, coord.z + 1});
-
-                const int baseX = coord.x * chunkSize;
-                const int baseY = coord.y * chunkSize;
-                const int baseZ = coord.z * chunkSize;
-
-                const auto isNeighborSolid = [&](int nx, int ny, int nz) {
-                    if (nx >= 0 && nx < chunkSize && ny >= 0 && ny < chunkSize && nz >= 0 && nz < chunkSize) {
-                        return chunk->at(nx, ny, nz).isSolid();
-                    }
-
-                    const Chunk* neighborChunk = nullptr;
-                    int sampleX = nx;
-                    int sampleY = ny;
-                    int sampleZ = nz;
-
-                    if (nx < 0) {
-                        neighborChunk = neighborXN;
-                        sampleX += chunkSize;
-                    } else if (nx >= chunkSize) {
-                        neighborChunk = neighborXP;
-                        sampleX -= chunkSize;
-                    } else if (ny < 0) {
-                        neighborChunk = neighborYN;
-                        sampleY += chunkSize;
-                    } else if (ny >= chunkSize) {
-                        neighborChunk = neighborYP;
-                        sampleY -= chunkSize;
-                    } else if (nz < 0) {
-                        neighborChunk = neighborZN;
-                        sampleZ += chunkSize;
-                    } else {
-                        neighborChunk = neighborZP;
-                        sampleZ -= chunkSize;
-                    }
-
-                    return neighborChunk != nullptr && neighborChunk->at(sampleX, sampleY, sampleZ).isSolid();
-                };
-
-                for (int localZ = 0; localZ < chunkSize; ++localZ) {
-                    for (int localY = 0; localY < chunkSize; ++localY) {
-                        for (int localX = 0; localX < chunkSize; ++localX) {
-                            const Voxel& voxel = chunk->at(localX, localY, localZ);
-                            if (!voxel.isSolid()) {
-                                continue;
-                            }
-
-                            const int worldX = baseX + localX;
-                            const int worldY = baseY + localY;
-                            const int worldZ = baseZ + localZ;
-                            const glm::vec3 basePosition(static_cast<float>(worldX), static_cast<float>(worldY), static_cast<float>(worldZ));
-
-                            for (const auto& face : gFaceDefinitions) {
-                                const int nx = localX + face.normal.x;
-                                const int ny = localY + face.normal.y;
-                                const int nz = localZ + face.normal.z;
-                                if (isNeighborSolid(nx, ny, nz)) {
-                                    continue;
-                                }
-
-                                const glm::vec3 baseColour = voxelBaseColor(voxel.type, face.normal);
-                                const float shade = shadeForNormal(face.normal);
-                                const glm::vec3 colour = glm::clamp(baseColour * shade, glm::vec3(0.0f), glm::vec3(1.0f));
-                                const uint32_t startIndex = static_cast<uint32_t>(threadVertices.size());
-
-                                for (const auto& corner : face.corners) {
-                                    const glm::vec3 position = basePosition + corner;
-                                    threadVertices.push_back(Vertex{position, colour});
-                                    threadBounds[t].first = (glm::min)(threadBounds[t].first, position);
-                                    threadBounds[t].second = (glm::max)(threadBounds[t].second, position);
-                                }
-
-                                threadIndices.push_back(startIndex);
-                                threadIndices.push_back(startIndex + 1);
-                                threadIndices.push_back(startIndex + 2);
-                                threadIndices.push_back(startIndex);
-                                threadIndices.push_back(startIndex + 2);
-                                threadIndices.push_back(startIndex + 3);
-                            }
-                        }
-                    }
+                PendingChunkMesh chunkMesh = buildChunkMeshData(coord);
+                if (chunkMesh.hasGeometry) {
+                    threadResults.push_back(std::move(chunkMesh));
                 }
             }
         });
@@ -1864,24 +1903,25 @@ void VulkanApp::buildVoxelMeshAsync() {
     auto endMeshTime = std::chrono::high_resolution_clock::now();
     auto meshDuration = std::chrono::duration_cast<std::chrono::milliseconds>(endMeshTime - startMeshTime).count();
 
-    // Merge all thread meshes
+    glm::vec3 minCorner((std::numeric_limits<float>::max)());
+    glm::vec3 maxCorner(std::numeric_limits<float>::lowest());
+    bool hasGeometry = false;
+
     uint32_t vertexOffset = 0;
     for (size_t t = 0; t < numThreads; ++t) {
-        const auto& threadVerts = threadMeshes[t].first;
-        const auto& threadInds = threadMeshes[t].second;
-
-        pendingVertices.insert(pendingVertices.end(), threadVerts.begin(), threadVerts.end());
-        
-        for (uint32_t idx : threadInds) {
-            pendingIndices.push_back(idx + vertexOffset);
+        for (const PendingChunkMesh& chunkMesh : threadChunkMeshes[t]) {
+            pendingVertices.insert(pendingVertices.end(), chunkMesh.vertices.begin(), chunkMesh.vertices.end());
+            for (uint32_t idx : chunkMesh.indices) {
+                pendingIndices.push_back(idx + vertexOffset);
+            }
+            vertexOffset += static_cast<uint32_t>(chunkMesh.vertices.size());
+            minCorner = (glm::min)(minCorner, chunkMesh.minCorner);
+            maxCorner = (glm::max)(maxCorner, chunkMesh.maxCorner);
+            hasGeometry = true;
         }
-
-        vertexOffset += static_cast<uint32_t>(threadVerts.size());
-        minCorner = (glm::min)(minCorner, threadBounds[t].first);
-        maxCorner = (glm::max)(maxCorner, threadBounds[t].second);
     }
 
-    if (!pendingVertices.empty()) {
+    if (hasGeometry) {
         pendingMeshCenter = (minCorner + maxCorner) * 0.5f;
         pendingMeshRadius = glm::length(maxCorner - pendingMeshCenter);
         pendingMeshRadius = std::max(pendingMeshRadius, 1.0f);
@@ -1890,12 +1930,16 @@ void VulkanApp::buildVoxelMeshAsync() {
         pendingMeshRadius = 1.0f;
     }
 
-    std::cout << "Async mesh generation complete: " << loadDuration << "ms (load chunks) + " << meshDuration << "ms (parallel mesh build)\n";
+    std::cout << "Async greedy mesh generation complete: " << loadDuration << "ms (load chunks) + " << meshDuration << "ms (parallel mesh build)\n";
     meshBuildProgress.store(100, std::memory_order_relaxed);
 }
 
+/**
+ * What: Swaps pending mesh into active data and uploads buffers to GPU; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::uploadPendingMesh() {
-    // Swaps pending mesh into active data and uploads buffers to GPU; takes no args and returns nothing.
     // Main thread only - swap pending mesh with active and upload to GPU
     {
         std::lock_guard<std::mutex> lock(meshDataLock);
@@ -1935,8 +1979,12 @@ void VulkanApp::uploadPendingMesh() {
     std::cout << "Mesh uploaded to GPU: " << voxelVertices.size() << " vertices, " << voxelIndices.size() << " indices\n";
 }
 
+/**
+ * What: Generates meshed geometry for one chunk coordinate; returns pending mesh vertices/indices/bounds.
+ * In: Function parameters.
+ * Out: Chunk coordinate value.
+ */
 VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coord) {
-    // Generates meshed geometry for one chunk coordinate; returns pending mesh vertices/indices/bounds.
     PendingChunkMesh result{};
     result.coord = coord;
 
@@ -1999,6 +2047,49 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
 
     result.vertices.reserve(24 * chunkSize * chunkSize);
     result.indices.reserve(36 * chunkSize * chunkSize);
+
+    struct VertexKey {
+        int32_t px;
+        int32_t py;
+        int32_t pz;
+        uint8_t cr;
+        uint8_t cg;
+        uint8_t cb;
+
+        bool operator==(const VertexKey& other) const noexcept {
+            return px == other.px && py == other.py && pz == other.pz
+                && cr == other.cr && cg == other.cg && cb == other.cb;
+        }
+    };
+
+    struct VertexKeyHash {
+        std::size_t operator()(const VertexKey& key) const noexcept {
+            std::size_t h = std::hash<int32_t>{}(key.px);
+            h ^= std::hash<int32_t>{}(key.py) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= std::hash<int32_t>{}(key.pz) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= std::hash<uint32_t>{}(static_cast<uint32_t>(key.cr) | (static_cast<uint32_t>(key.cg) << 8) | (static_cast<uint32_t>(key.cb) << 16))
+                + 0x9e3779b9 + (h << 6) + (h >> 2);
+            return h;
+        }
+    };
+
+    std::unordered_map<VertexKey, uint32_t, VertexKeyHash> vertexLookup;
+    vertexLookup.reserve(24 * chunkSize * chunkSize);
+
+    const auto toVertexKey = [](const glm::vec3& position, const glm::vec3& colour) {
+        const auto toByte = [](float c) -> uint8_t {
+            return static_cast<uint8_t>(std::clamp(static_cast<int>(std::lround(c * 255.0f)), 0, 255));
+        };
+
+        return VertexKey{
+            static_cast<int32_t>(std::lround(position.x)),
+            static_cast<int32_t>(std::lround(position.y)),
+            static_cast<int32_t>(std::lround(position.z)),
+            toByte(colour.r),
+            toByte(colour.g),
+            toByte(colour.b)
+        };
+    };
 
     const auto isNeighborSolid = [&](int nx, int ny, int nz) {
         if (nx >= 0 && nx < chunkSize && ny >= 0 && ny < chunkSize && nz >= 0 && nz < chunkSize) {
@@ -2116,19 +2207,31 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
             }
         }
 
-        const uint32_t startIndex = static_cast<uint32_t>(result.vertices.size());
-        for (const glm::vec3& position : corners) {
-            result.vertices.push_back(Vertex{position, colour});
+        std::array<uint32_t, 4> cornerIndices{};
+        for (size_t cornerIndex = 0; cornerIndex < corners.size(); ++cornerIndex) {
+            const glm::vec3& position = corners[cornerIndex];
+            const VertexKey key = toVertexKey(position, colour);
+
+            const auto it = vertexLookup.find(key);
+            if (it != vertexLookup.end()) {
+                cornerIndices[cornerIndex] = it->second;
+            } else {
+                const uint32_t newIndex = static_cast<uint32_t>(result.vertices.size());
+                result.vertices.push_back(Vertex{position, colour});
+                vertexLookup.emplace(key, newIndex);
+                cornerIndices[cornerIndex] = newIndex;
+            }
+
             result.minCorner = (glm::min)(result.minCorner, position);
             result.maxCorner = (glm::max)(result.maxCorner, position);
         }
 
-        result.indices.push_back(startIndex);
-        result.indices.push_back(startIndex + 1);
-        result.indices.push_back(startIndex + 2);
-        result.indices.push_back(startIndex);
-        result.indices.push_back(startIndex + 2);
-        result.indices.push_back(startIndex + 3);
+        result.indices.push_back(cornerIndices[0]);
+        result.indices.push_back(cornerIndices[1]);
+        result.indices.push_back(cornerIndices[2]);
+        result.indices.push_back(cornerIndices[0]);
+        result.indices.push_back(cornerIndices[2]);
+        result.indices.push_back(cornerIndices[3]);
     };
 
     std::vector<uint8_t> mask(static_cast<size_t>(chunkSize * chunkSize), 0);
@@ -2168,6 +2271,14 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
                     if (!voxel.isSolid()) {
                         continue;
                     }
+
+                        if (!kEmitBottomFaces && normal.y < 0) {
+                            continue;
+                        }
+
+                        if (!kEmitWaterSideAndBottomFaces && voxel.type == 3 && normal.y <= 0) {
+                            continue;
+                        }
 
                     const int nx = localX + normal.x;
                     const int ny = localY + normal.y;
@@ -2230,8 +2341,12 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
     return result;
 }
 
+/**
+ * What: Destroys GPU buffers owned by a chunk mesh and resets handles; takes mesh ref and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::destroyChunkMeshResources(GpuChunkMesh& mesh) {
-    // Destroys GPU buffers owned by a chunk mesh and resets handles; takes mesh ref and returns nothing.
     if (mesh.vertexBuffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(device, mesh.vertexBuffer, nullptr);
         mesh.vertexBuffer = VK_NULL_HANDLE;
@@ -2248,11 +2363,16 @@ void VulkanApp::destroyChunkMeshResources(GpuChunkMesh& mesh) {
         vkFreeMemory(device, mesh.indexBufferMemory, nullptr);
         mesh.indexBufferMemory = VK_NULL_HANDLE;
     }
+    mesh.vertexCount = 0;
     mesh.indexCount = 0;
 }
 
+/**
+ * What: Performs frustum and distance culling for a chunk mesh; returns true when chunk should render.
+ * In: Function parameters.
+ * Out: Boolean result.
+ */
 bool VulkanApp::isChunkVisible(const GpuChunkMesh& mesh, const std::array<glm::vec4, 6>& frustumPlanes, float maxVisibleDistance, const glm::vec3& cameraPos) const {
-    // Performs frustum and distance culling for a chunk mesh; returns true when chunk should render.
     const glm::vec3 chunkCenter = (mesh.minCorner + mesh.maxCorner) * 0.5f;
     const float chunkRadius = glm::length(mesh.maxCorner - chunkCenter);
     const glm::vec3 toChunk = chunkCenter - cameraPos;
@@ -2269,7 +2389,7 @@ bool VulkanApp::isChunkVisible(const GpuChunkMesh& mesh, const std::array<glm::v
             normal.y >= 0.0f ? mesh.maxCorner.y : mesh.minCorner.y,
             normal.z >= 0.0f ? mesh.maxCorner.z : mesh.minCorner.z
         );
-        if (glm::dot(normal, positiveVertex) + plane.w < 0.0f) {
+        if (glm::dot(normal, positiveVertex) + plane.w < -4.0f) {
             return false;
         }
     }
@@ -2277,8 +2397,12 @@ bool VulkanApp::isChunkVisible(const GpuChunkMesh& mesh, const std::array<glm::v
     return true;
 }
 
+/**
+ * What: Defers chunk mesh destruction until GPU submissions are safe; takes mesh rvalue and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::enqueueChunkMeshForDestruction(GpuChunkMesh&& mesh) {
-    // Defers chunk mesh destruction until GPU submissions are safe; takes mesh rvalue and returns nothing.
     if (mesh.vertexBuffer == VK_NULL_HANDLE && mesh.indexBuffer == VK_NULL_HANDLE) {
         return;
     }
@@ -2289,8 +2413,12 @@ void VulkanApp::enqueueChunkMeshForDestruction(GpuChunkMesh&& mesh) {
     deferredDestroyQueue.push_back(std::move(entry));
 }
 
+/**
+ * What: Destroys deferred chunk meshes whose retire frame is complete; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::processDeferredDestroyQueue() {
-    // Destroys deferred chunk meshes whose retire frame is complete; takes no args and returns nothing.
     while (!deferredDestroyQueue.empty()) {
         DeferredDestroyEntry& entry = deferredDestroyQueue.front();
         if (entry.retireAfterCompletedSubmission > completedSubmissionCount) {
@@ -2301,8 +2429,12 @@ void VulkanApp::processDeferredDestroyQueue() {
     }
 }
 
+/**
+ * What: Recomputes global mesh center/radius from active chunk bounds; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::updateActiveMeshBounds() {
-    // Recomputes global mesh center/radius from active chunk bounds; takes no args and returns nothing.
     if (activeChunkMeshes.empty()) {
         meshCenter = glm::vec3(0.0f);
         meshRadius = 1.0f;
@@ -2332,8 +2464,12 @@ void VulkanApp::updateActiveMeshBounds() {
     meshRadius = std::max(glm::length(maxCorner - meshCenter), 1.0f);
 }
 
+/**
+ * What: Releases all active/deferred/pending chunk mesh GPU resources; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::clearAllChunkMeshes() {
-    // Releases all active/deferred/pending chunk mesh GPU resources; takes no args and returns nothing.
     processDeferredDestroyQueue();
     for (auto& [coord, mesh] : activeChunkMeshes) {
         destroyChunkMeshResources(mesh);
@@ -2376,8 +2512,12 @@ void VulkanApp::clearAllChunkMeshes() {
     pendingUploadBatches.clear();
 }
 
+/**
+ * What: Converts world-space position to integer chunk coordinate; returns containing chunk.
+ * In: Function parameters.
+ * Out: Chunk coordinate value.
+ */
 ChunkCoord VulkanApp::chunkForPosition(const glm::vec3& position) const {
-    // Converts world-space position to integer chunk coordinate; returns containing chunk.
     const int worldX = static_cast<int>(std::floor(position.x));
     const int worldY = static_cast<int>(std::floor(position.y));
     const int worldZ = static_cast<int>(std::floor(position.z));
@@ -2388,8 +2528,12 @@ ChunkCoord VulkanApp::chunkForPosition(const glm::vec3& position) const {
     };
 }
 
+/**
+ * What: Samples highest solid voxel at X/Z and returns terrain height in world units.
+ * In: Function parameters.
+ * Out: Floating-point value.
+ */
 float VulkanApp::sampleTerrainHeightAt(int worldX, int worldZ) const {
-    // Samples highest solid voxel at X/Z and returns terrain height in world units.
     std::shared_lock<std::shared_mutex> worldLock(worldDataMutex);
     const int activeRenderDistance = renderDistanceChunks.load(std::memory_order_relaxed);
     const int minWorldY = (loadedTerrainCenterChunk.y - activeRenderDistance) * kChunkSize;
@@ -2405,8 +2549,12 @@ float VulkanApp::sampleTerrainHeightAt(int worldX, int worldZ) const {
     return static_cast<float>(terrainSettings.baseHeight + 2.0f);
 }
 
+/**
+ * What: Places camera above sampled terrain near loaded center chunk; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::placeCameraOnTerrain() {
-    // Places camera above sampled terrain near loaded center chunk; takes no args and returns nothing.
     const int sampleX = loadedTerrainCenterChunk.x * kChunkSize + (kChunkSize / 2);
     const int sampleZ = loadedTerrainCenterChunk.z * kChunkSize + (kChunkSize / 2);
     const float terrainHeight = sampleTerrainHeightAt(sampleX, sampleZ);
@@ -2422,8 +2570,12 @@ void VulkanApp::placeCameraOnTerrain() {
     cameraPlacedOnTerrain = true;
 }
 
+/**
+ * What: Finalizes completed upload batches and installs ready chunk meshes; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
 void VulkanApp::processCompletedUploadBatches() {
-    // Finalizes completed upload batches and installs ready chunk meshes; takes no args and returns nothing.
     bool boundsDirty = false;
 
     while (!pendingUploadBatches.empty()) {

@@ -13,11 +13,19 @@ constexpr float kMinPitch = -89.0f;
 const glm::vec3 kWorldUp(0.0f, 1.0f, 0.0f);
 }
 
-// Constructs input controller with default sensitivity/speed state; takes no inputs and returns an InputController instance.
+/**
+ * Initializes input controller state.
+ * @return No return value.
+ */
 InputController::InputController() = default;
 
+/**
+ * Attaches the input controller to a window and camera.
+ * @param windowHandle GLFW window used for input polling.
+ * @param cameraRef Camera updated by controller input.
+ * @return No return value.
+ */
 void InputController::attach(GLFWwindow* windowHandle, Camera* cameraRef) {
-    // Attaches GLFW window and camera pointers used for input updates; outputs no return value.
     window = windowHandle;
     camera = cameraRef;
     firstMouseSample = true;
@@ -29,23 +37,38 @@ void InputController::attach(GLFWwindow* windowHandle, Camera* cameraRef) {
     syncOrientationFromCamera();
 }
 
+/**
+ * Sets base movement speed.
+ * @param speed Movement speed units per second.
+ * @return No return value.
+ */
 void InputController::setMovementSpeed(float speed) {
-    // Sets movement speed from speed input clamped to non-negative; outputs no return value.
     movementSpeed = std::max(speed, 0.0f);
 }
 
+/**
+ * Sets sprint speed multiplier.
+ * @param multiplier Sprint multiplier applied while sprint key is held.
+ * @return No return value.
+ */
 void InputController::setSprintMultiplier(float multiplier) {
-    // Sets sprint multiplier from multiplier input clamped to at least 1; outputs no return value.
     sprintMultiplier = std::max(multiplier, 1.0f);
 }
 
+/**
+ * Sets mouse look sensitivity.
+ * @param sensitivity Mouse sensitivity scalar.
+ * @return No return value.
+ */
 void InputController::setMouseSensitivity(float sensitivity) {
-    // Sets mouse sensitivity from sensitivity input clamped to non-negative; outputs no return value.
     mouseSensitivity = std::max(sensitivity, 0.0f);
 }
 
+/**
+ * Aligns internal yaw/pitch values with current camera orientation.
+ * @return No return value.
+ */
 void InputController::syncOrientationFromCamera() {
-    // Synchronizes yaw/pitch from current camera direction state; outputs no return value.
     if (camera == nullptr) {
         return;
     }
@@ -60,8 +83,12 @@ void InputController::syncOrientationFromCamera() {
     pitchDegrees = std::clamp(pitchDegrees, kMinPitch, kMaxPitch);
 }
 
+/**
+ * Processes one frame of input and applies camera changes.
+ * @param deltaTime Frame delta time in seconds.
+ * @return No return value.
+ */
 void InputController::update(double deltaTime) {
-    // Processes input for one frame using deltaTime seconds and applies camera movement/rotation; outputs no return value.
     if (window == nullptr || camera == nullptr) {
         return;
     }
@@ -108,8 +135,13 @@ void InputController::update(double deltaTime) {
     updatePosition(deltaTime, forward, right, kWorldUp);
 }
 
+/**
+ * Updates yaw/pitch using mouse delta offsets.
+ * @param xOffset Horizontal mouse delta.
+ * @param yOffset Vertical mouse delta.
+ * @return No return value.
+ */
 void InputController::updateOrientation(double xOffset, double yOffset) {
-    // Updates yaw/pitch from mouse deltas xOffset/yOffset; outputs no return value.
     const float scaledX = static_cast<float>(xOffset) * mouseSensitivity;
     const float scaledY = static_cast<float>(yOffset) * mouseSensitivity;
 
@@ -118,8 +150,15 @@ void InputController::updateOrientation(double xOffset, double yOffset) {
     pitchDegrees = std::clamp(pitchDegrees, kMinPitch, kMaxPitch);
 }
 
+/**
+ * Updates camera position from movement input.
+ * @param deltaTimeSeconds Frame delta time in seconds.
+ * @param forward Forward basis vector.
+ * @param right Right basis vector.
+ * @param worldUp Global up vector.
+ * @return No return value.
+ */
 void InputController::updatePosition(double deltaTimeSeconds, const glm::vec3& forward, const glm::vec3& right, const glm::vec3& worldUp) {
-    // Applies keyboard movement using deltaTime and basis vectors forward/right/worldUp; outputs no return value.
     if (deltaTimeSeconds <= 0.0) {
         return;
     }
