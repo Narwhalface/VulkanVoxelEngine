@@ -2,9 +2,13 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "CMake: Configure",
+            "label": "CMake: Configure (Debug)",
             "type": "shell",
-            "command": "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64",
+            "command": "cmake",
+            "args": [
+                "--preset",
+                "vs2022-debug"
+            ],
             "problemMatcher": [],
             "group": "build",
             "presentation": {
@@ -12,11 +16,76 @@
             }
         },
         {
-            "label": "CMake: Build",
+            "label": "CMake: Build (Debug)",
             "type": "shell",
-            "command": "cmake --build build --config Debug",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "--preset",
+                "build-debug"
+            ],
             "problemMatcher": [],
-            "dependsOn": "CMake: Configure",
+            "dependsOn": "CMake: Configure (Debug)",
+            "group": "build",
+            "presentation": {
+                "reveal": "always"
+            }
+        },
+        {
+            "label": "CMake: Configure (Release)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--preset",
+                "vs2022-release"
+            ],
+            "problemMatcher": [],
+            "group": "build",
+            "presentation": {
+                "reveal": "always"
+            }
+        },
+        {
+            "label": "CMake: Build (Release)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "--preset",
+                "build-release"
+            ],
+            "problemMatcher": [],
+            "dependsOn": "CMake: Configure (Release)",
+            "group": "build",
+            "presentation": {
+                "reveal": "always"
+            }
+        },
+        {
+            "label": "CMake: Configure (RelWithDebInfo)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--preset",
+                "vs2022-relwithdebinfo"
+            ],
+            "problemMatcher": [],
+            "group": "build",
+            "presentation": {
+                "reveal": "always"
+            }
+        },
+        {
+            "label": "CMake: Build (RelWithDebInfo)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "--preset",
+                "build-relwithdebinfo"
+            ],
+            "problemMatcher": [],
+            "dependsOn": "CMake: Configure (RelWithDebInfo)",
             "group": "build",
             "presentation": {
                 "reveal": "always"

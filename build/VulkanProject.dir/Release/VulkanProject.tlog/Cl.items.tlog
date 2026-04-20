@@ -1,0 +1,6 @@
+C:\Dev\VulkanVoxelEngine\src\main.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProject.dir\Release\main.obj
+C:\Dev\VulkanVoxelEngine\src\VulkanApp.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProject.dir\Release\VulkanApp.obj
+C:\Dev\VulkanVoxelEngine\src\Camera.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProject.dir\Release\Camera.obj
+C:\Dev\VulkanVoxelEngine\src\InputController.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProject.dir\Release\InputController.obj
+C:\Dev\VulkanVoxelEngine\src\RenderLoop.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProject.dir\Release\RenderLoop.obj
+C:\Dev\VulkanVoxelEngine\src\World.cpp;C:\Dev\VulkanVoxelEngine\build\VulkanProject.dir\Release\World.obj

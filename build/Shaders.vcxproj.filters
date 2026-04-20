@@ -1,6 +1,9 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\164d6edd83bdc7ecbb149c90f38297dd\shadow.vert.spv.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
     <CustomBuild Include="C:\Dev\VulkanVoxelEngine\build\CMakeFiles\164d6edd83bdc7ecbb149c90f38297dd\voxel.frag.spv.rule">
       <Filter>CMake Rules</Filter>
     </CustomBuild>

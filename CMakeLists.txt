@@ -63,6 +63,7 @@ set(SHADER_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/shaders")
 set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/voxel.vert"
     "${SHADER_SOURCE_DIR}/voxel.frag"
+    "${SHADER_SOURCE_DIR}/shadow.vert"
 )
 
 set(SPIRV_OUTPUTS)

@@ -125,8 +125,8 @@ VkVertexInputBindingDescription Vertex::getBindingDescription() {
  * In: Function parameters.
  * Out: Function return value.
  */
-std::array<VkVertexInputAttributeDescription, 2> Vertex::getAttributeDescriptions() {
-    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+std::array<VkVertexInputAttributeDescription, 3> Vertex::getAttributeDescriptions() {
+    std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
 
     attributeDescriptions[0].binding  = 0;
     attributeDescriptions[0].location = 0;
@@ -137,6 +137,11 @@ std::array<VkVertexInputAttributeDescription, 2> Vertex::getAttributeDescription
     attributeDescriptions[1].location = 1;
     attributeDescriptions[1].format   = VK_FORMAT_R32G32B32_SFLOAT;
     attributeDescriptions[1].offset   = offsetof(Vertex, color);
+
+    attributeDescriptions[2].binding  = 0;
+    attributeDescriptions[2].location = 2;
+    attributeDescriptions[2].format   = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[2].offset   = offsetof(Vertex, normal);
 
     return attributeDescriptions;
 }
@@ -240,6 +245,8 @@ void VulkanApp::initialize() {
     createImageViews();
     createRenderPass();
     createDescriptorSetLayout();
+    createShadowResources();
+    createShadowRenderPass();
     createGraphicsPipeline();
     createDepthResources();
     createFramebuffers();
@@ -385,6 +392,26 @@ void VulkanApp::cleanup() {
         if (descriptorPool != VK_NULL_HANDLE) {
             vkDestroyDescriptorPool(device, descriptorPool, nullptr);
             descriptorPool = VK_NULL_HANDLE;
+        }
+
+        if (shadowSampler != VK_NULL_HANDLE) {
+            vkDestroySampler(device, shadowSampler, nullptr);
+            shadowSampler = VK_NULL_HANDLE;
+        }
+
+        if (shadowImageView != VK_NULL_HANDLE) {
+            vkDestroyImageView(device, shadowImageView, nullptr);
+            shadowImageView = VK_NULL_HANDLE;
+        }
+
+        if (shadowImage != VK_NULL_HANDLE) {
+            vkDestroyImage(device, shadowImage, nullptr);
+            shadowImage = VK_NULL_HANDLE;
+        }
+
+        if (shadowImageMemory != VK_NULL_HANDLE) {
+            vkFreeMemory(device, shadowImageMemory, nullptr);
+            shadowImageMemory = VK_NULL_HANDLE;
         }
 
         clearAllChunkMeshes();
@@ -871,16 +898,130 @@ void VulkanApp::createDescriptorSetLayout() {
     uboLayoutBinding.binding            = 0;
     uboLayoutBinding.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     uboLayoutBinding.descriptorCount    = 1;
-    uboLayoutBinding.stageFlags         = VK_SHADER_STAGE_VERTEX_BIT;
+    uboLayoutBinding.stageFlags         = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     uboLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding shadowSamplerBinding{};
+    shadowSamplerBinding.binding            = 1;
+    shadowSamplerBinding.descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    shadowSamplerBinding.descriptorCount    = 1;
+    shadowSamplerBinding.stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
+    shadowSamplerBinding.pImmutableSamplers = nullptr;
+
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboLayoutBinding, shadowSamplerBinding};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 1;
-    layoutInfo.pBindings    = &uboLayoutBinding;
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings    = bindings.data();
 
     if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create descriptor set layout");
+    }
+}
+
+/**
+ * What: Creates the shadow map image, image view, and sampler; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
+void VulkanApp::createShadowResources() {
+    if (shadowImageFormat == VK_FORMAT_UNDEFINED) {
+        shadowImageFormat = findShadowMapFormat();
+    }
+
+    createImage(
+        shadowMapExtent.width,
+        shadowMapExtent.height,
+        shadowImageFormat,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        shadowImage,
+        shadowImageMemory);
+
+    shadowImageView = createImageView(shadowImage, shadowImageFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter               = VK_FILTER_NEAREST;
+    samplerInfo.minFilter               = VK_FILTER_NEAREST;
+    samplerInfo.mipmapMode              = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    samplerInfo.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    samplerInfo.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    samplerInfo.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    samplerInfo.borderColor             = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    samplerInfo.mipLodBias              = 0.0f;
+    samplerInfo.maxAnisotropy           = 1.0f;
+    samplerInfo.anisotropyEnable        = VK_FALSE;
+    samplerInfo.compareEnable           = VK_FALSE;
+    samplerInfo.compareOp               = VK_COMPARE_OP_ALWAYS;
+    samplerInfo.minLod                  = 0.0f;
+    samplerInfo.maxLod                  = 0.0f;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+
+    if (vkCreateSampler(device, &samplerInfo, nullptr, &shadowSampler) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create shadow sampler");
+    }
+}
+
+/**
+ * What: Creates the depth-only render pass for the shadow map; takes no args and returns nothing.
+ * In: Function parameters.
+ * Out: No return value.
+ */
+void VulkanApp::createShadowRenderPass() {
+    if (shadowImageFormat == VK_FORMAT_UNDEFINED) {
+        shadowImageFormat = findShadowMapFormat();
+    }
+
+    VkAttachmentDescription shadowDepthAttachment{};
+    shadowDepthAttachment.format         = shadowImageFormat;
+    shadowDepthAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
+    shadowDepthAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    shadowDepthAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+    shadowDepthAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    shadowDepthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    shadowDepthAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+    shadowDepthAttachment.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+    VkAttachmentReference shadowDepthRef{};
+    shadowDepthRef.attachment = 0;
+    shadowDepthRef.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount    = 0;
+    subpass.pDepthStencilAttachment = &shadowDepthRef;
+
+    std::array<VkSubpassDependency, 2> dependencies{};
+    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[0].dstSubpass = 0;
+    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    dependencies[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    dependencies[1].srcSubpass = 0;
+    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dependencies[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    VkRenderPassCreateInfo renderPassInfo{};
+    renderPassInfo.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    renderPassInfo.attachmentCount = 1;
+    renderPassInfo.pAttachments    = &shadowDepthAttachment;
+    renderPassInfo.subpassCount    = 1;
+    renderPassInfo.pSubpasses      = &subpass;
+    renderPassInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
+    renderPassInfo.pDependencies   = dependencies.data();
+
+    if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &shadowRenderPass) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create shadow render pass");
     }
 }
 
@@ -890,14 +1031,16 @@ void VulkanApp::createDescriptorSetLayout() {
  * Out: No return value.
  */
 void VulkanApp::createDescriptorPool() {
-    VkDescriptorPoolSize poolSize{};
-    poolSize.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    std::array<VkDescriptorPoolSize, 2> poolSizes{};
+    poolSizes[0].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    poolSizes[1].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = 1;
-    poolInfo.pPoolSizes    = &poolSize;
+    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    poolInfo.pPoolSizes    = poolSizes.data();
     poolInfo.maxSets       = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
@@ -930,6 +1073,11 @@ void VulkanApp::createDescriptorSets() {
         bufferInfo.offset = 0;
         bufferInfo.range  = sizeof(UniformBufferObject);
 
+        VkDescriptorImageInfo shadowInfo{};
+        shadowInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        shadowInfo.imageView   = shadowImageView;
+        shadowInfo.sampler     = shadowSampler;
+
         VkWriteDescriptorSet descriptorWrite{};
         descriptorWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrite.dstSet          = descriptorSets[i];
@@ -939,7 +1087,17 @@ void VulkanApp::createDescriptorSets() {
         descriptorWrite.descriptorCount = 1;
         descriptorWrite.pBufferInfo     = &bufferInfo;
 
-        vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+        VkWriteDescriptorSet shadowWrite{};
+        shadowWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        shadowWrite.dstSet          = descriptorSets[i];
+        shadowWrite.dstBinding      = 1;
+        shadowWrite.dstArrayElement = 0;
+        shadowWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        shadowWrite.descriptorCount = 1;
+        shadowWrite.pImageInfo      = &shadowInfo;
+
+        std::array<VkWriteDescriptorSet, 2> writes = {descriptorWrite, shadowWrite};
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 }
 
@@ -951,9 +1109,11 @@ void VulkanApp::createDescriptorSets() {
 void VulkanApp::createGraphicsPipeline() {
     auto vertShaderCode = readfile("shaders/voxel.vert.spv");
     auto fragShaderCode = readfile("shaders/voxel.frag.spv");
+    auto shadowVertShaderCode = readfile("shaders/shadow.vert.spv");
 
     VkShaderModule vertShaderModule = createShaderModule(device, vertShaderCode);
     VkShaderModule fragShaderModule = createShaderModule(device, fragShaderCode);
+    VkShaderModule shadowVertShaderModule = createShaderModule(device, shadowVertShaderCode);
 
     VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
     vertShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -966,6 +1126,12 @@ void VulkanApp::createGraphicsPipeline() {
     fragShaderStageInfo.stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
     fragShaderStageInfo.module = fragShaderModule;
     fragShaderStageInfo.pName  = "main";
+
+    VkPipelineShaderStageCreateInfo shadowVertShaderStageInfo{};
+    shadowVertShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shadowVertShaderStageInfo.stage  = VK_SHADER_STAGE_VERTEX_BIT;
+    shadowVertShaderStageInfo.module = shadowVertShaderModule;
+    shadowVertShaderStageInfo.pName  = "main";
 
     VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
@@ -1069,6 +1235,60 @@ void VulkanApp::createGraphicsPipeline() {
 
     std::cout << "Graphics pipeline layout created\n";
 
+    VkViewport shadowViewport{};
+    shadowViewport.x = 0.0f;
+    shadowViewport.y = 0.0f;
+    shadowViewport.width = static_cast<float>(shadowMapExtent.width);
+    shadowViewport.height = static_cast<float>(shadowMapExtent.height);
+    shadowViewport.minDepth = 0.0f;
+    shadowViewport.maxDepth = 1.0f;
+
+    VkRect2D shadowScissor{};
+    shadowScissor.offset = {0, 0};
+    shadowScissor.extent = shadowMapExtent;
+
+    VkPipelineViewportStateCreateInfo shadowViewportState{};
+    shadowViewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    shadowViewportState.viewportCount = 1;
+    shadowViewportState.pViewports = &shadowViewport;
+    shadowViewportState.scissorCount = 1;
+    shadowViewportState.pScissors = &shadowScissor;
+
+    VkPipelineRasterizationStateCreateInfo shadowRasterizer = rasterizer;
+    shadowRasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    shadowRasterizer.depthBiasEnable = VK_TRUE;
+    shadowRasterizer.depthBiasConstantFactor = 0.08f;
+    shadowRasterizer.depthBiasSlopeFactor = 0.35f;
+    shadowRasterizer.depthBiasClamp = 0.0f;
+
+    VkPipelineColorBlendStateCreateInfo shadowColorBlending{};
+    shadowColorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    shadowColorBlending.logicOpEnable = VK_FALSE;
+    shadowColorBlending.attachmentCount = 0;
+    shadowColorBlending.pAttachments = nullptr;
+
+    VkGraphicsPipelineCreateInfo shadowPipelineInfo{};
+    shadowPipelineInfo.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    shadowPipelineInfo.stageCount          = 1;
+    shadowPipelineInfo.pStages             = &shadowVertShaderStageInfo;
+    shadowPipelineInfo.pVertexInputState   = &vertexInputInfo;
+    shadowPipelineInfo.pInputAssemblyState = &inputAssembly;
+    shadowPipelineInfo.pViewportState      = &shadowViewportState;
+    shadowPipelineInfo.pRasterizationState = &shadowRasterizer;
+    shadowPipelineInfo.pMultisampleState   = &multisampling;
+    shadowPipelineInfo.pDepthStencilState  = &depthStencil;
+    shadowPipelineInfo.layout              = pipelineLayout;
+    shadowPipelineInfo.pColorBlendState    = &shadowColorBlending;
+    shadowPipelineInfo.pDynamicState       = nullptr;
+    shadowPipelineInfo.renderPass          = shadowRenderPass;
+    shadowPipelineInfo.subpass             = 0;
+    shadowPipelineInfo.basePipelineHandle  = VK_NULL_HANDLE;
+    shadowPipelineInfo.basePipelineIndex   = -1;
+
+    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &shadowPipelineInfo, nullptr, &shadowPipeline) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create shadow pipeline");
+    }
+
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineInfo.stageCount          = 2;
@@ -1095,6 +1315,7 @@ void VulkanApp::createGraphicsPipeline() {
 
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
     vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(device, shadowVertShaderModule, nullptr);
 }
 
 /**
@@ -1184,6 +1405,24 @@ void VulkanApp::framebufferResizeCallback(GLFWwindow* window, int width, int hei
  * Out: No return value.
  */
 void VulkanApp::createFramebuffers() {
+    if (shadowFramebuffer != VK_NULL_HANDLE) {
+        vkDestroyFramebuffer(device, shadowFramebuffer, nullptr);
+        shadowFramebuffer = VK_NULL_HANDLE;
+    }
+
+    VkFramebufferCreateInfo shadowFramebufferInfo{};
+    shadowFramebufferInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    shadowFramebufferInfo.renderPass      = shadowRenderPass;
+    shadowFramebufferInfo.attachmentCount = 1;
+    shadowFramebufferInfo.pAttachments    = &shadowImageView;
+    shadowFramebufferInfo.width           = shadowMapExtent.width;
+    shadowFramebufferInfo.height          = shadowMapExtent.height;
+    shadowFramebufferInfo.layers          = 1;
+
+    if (vkCreateFramebuffer(device, &shadowFramebufferInfo, nullptr, &shadowFramebuffer) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create shadow framebuffer");
+    }
+
     swapchainFramebuffers.resize(swapchainImageViews.size());
 
     for (size_t i = 0; i < swapchainImageViews.size(); ++i) {
@@ -1367,7 +1606,7 @@ void VulkanApp::buildVoxelMesh() {
 
     auto startMeshTime = std::chrono::high_resolution_clock::now();
 
-    std::vector<std::vector<PendingChunkMesh>> threadChunkMeshes(numThreads);
+    std::vector<std::vector<PendingChunkMeshBatch>> threadChunkMeshes(numThreads);
 
     std::vector<std::thread> threads;
     for (size_t t = 0; t < numThreads; ++t) {
@@ -1379,7 +1618,7 @@ void VulkanApp::buildVoxelMesh() {
 
             for (size_t i = startIdx; i < endIdx; ++i) {
                 const ChunkCoord coord = chunkCoords[i];
-                PendingChunkMesh chunkMesh = buildChunkMeshData(coord);
+                PendingChunkMeshBatch chunkMesh = buildChunkMeshData(coord);
                 if (chunkMesh.hasGeometry) {
                     threadResults.push_back(std::move(chunkMesh));
                 }
@@ -1401,15 +1640,17 @@ void VulkanApp::buildVoxelMesh() {
 
     uint32_t vertexOffset = 0;
     for (size_t t = 0; t < numThreads; ++t) {
-        for (const PendingChunkMesh& chunkMesh : threadChunkMeshes[t]) {
-            voxelVertices.insert(voxelVertices.end(), chunkMesh.vertices.begin(), chunkMesh.vertices.end());
-            for (uint32_t idx : chunkMesh.indices) {
-                voxelIndices.push_back(idx + vertexOffset);
+        for (const PendingChunkMeshBatch& chunkBatch : threadChunkMeshes[t]) {
+            for (const PendingChunkMesh& chunkMesh : chunkBatch.regionMeshes) {
+                voxelVertices.insert(voxelVertices.end(), chunkMesh.vertices.begin(), chunkMesh.vertices.end());
+                for (uint32_t idx : chunkMesh.indices) {
+                    voxelIndices.push_back(idx + vertexOffset);
+                }
+                vertexOffset += static_cast<uint32_t>(chunkMesh.vertices.size());
+                minCorner = (glm::min)(minCorner, chunkMesh.minCorner);
+                maxCorner = (glm::max)(maxCorner, chunkMesh.maxCorner);
+                hasGeometry = true;
             }
-            vertexOffset += static_cast<uint32_t>(chunkMesh.vertices.size());
-            minCorner = (glm::min)(minCorner, chunkMesh.minCorner);
-            maxCorner = (glm::max)(maxCorner, chunkMesh.maxCorner);
-            hasGeometry = true;
         }
     }
 
@@ -1607,6 +1848,18 @@ VkFormat VulkanApp::findDepthFormat() const {
 }
 
 /**
+ * What: Finds a sampleable depth format for the shadow map; returns selected format.
+ * In: Function parameters.
+ * Out: Vulkan format value.
+ */
+VkFormat VulkanApp::findShadowMapFormat() const {
+    return findSupportedFormat(
+        {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D16_UNORM},
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT);
+}
+
+/**
  * What: Tests whether the provided depth format includes a stencil component; returns true/false.
  * In: Function parameters.
  * Out: Boolean result.
@@ -1700,6 +1953,11 @@ void VulkanApp::createSyncObjects() {
  * Out: No return value.
  */
 void VulkanApp::cleanupSwapChain() {
+    if (shadowFramebuffer != VK_NULL_HANDLE) {
+        vkDestroyFramebuffer(device, shadowFramebuffer, nullptr);
+        shadowFramebuffer = VK_NULL_HANDLE;
+    }
+
     for (auto framebuffer : swapchainFramebuffers) {
         if (framebuffer != VK_NULL_HANDLE) {
             vkDestroyFramebuffer(device, framebuffer, nullptr);
@@ -1733,6 +1991,11 @@ void VulkanApp::cleanupSwapChain() {
         graphicsPipeline = VK_NULL_HANDLE;
     }
 
+    if (shadowPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, shadowPipeline, nullptr);
+        shadowPipeline = VK_NULL_HANDLE;
+    }
+
     if (pipelineLayout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         pipelineLayout = VK_NULL_HANDLE;
@@ -1741,6 +2004,11 @@ void VulkanApp::cleanupSwapChain() {
     if (renderPass != VK_NULL_HANDLE) {
         vkDestroyRenderPass(device, renderPass, nullptr);
         renderPass = VK_NULL_HANDLE;
+    }
+
+    if (shadowRenderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(device, shadowRenderPass, nullptr);
+        shadowRenderPass = VK_NULL_HANDLE;
     }
 
     for (auto imageView : swapchainImageViews) {
@@ -1780,6 +2048,7 @@ void VulkanApp::recreateSwapChain() {
     createSwapchain();
     createImageViews();
     createRenderPass();
+    createShadowRenderPass();
     createGraphicsPipeline();
     createDepthResources();
     createFramebuffers();
@@ -1809,8 +2078,92 @@ void VulkanApp::updateUniformBuffer(uint32_t currentImage) {
 
     ubo.view = camera.viewMatrix();
     ubo.proj = camera.projectionMatrix();
+    const glm::vec3 lightDirection = glm::normalize(glm::vec3(-0.45f, -1.0f, -0.30f));
+    ubo.lightViewProj = buildLightViewProjectionMatrix(lightDirection);
+    ubo.lightDirection = glm::vec4(lightDirection, 0.0f);
+    ubo.lightColor = glm::vec4(1.0f, 0.97f, 0.92f, 1.0f);
+    ubo.ambientColor = glm::vec4(0.34f, 0.40f, 0.48f, 1.0f);
+    ubo.cameraPosition = glm::vec4(camera.position(), 1.0f);
+    ubo.shadowParams = glm::vec4(static_cast<float>(shadowMapExtent.width), 0.00055f, 0.00008f, 1.0f);
+    ubo.debugParams = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
 
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+}
+
+/**
+ * What: Builds a directional-light view-projection matrix fit to the camera-visible shadow region.
+ * In: Function parameters.
+ * Out: Function return value.
+ */
+glm::mat4 VulkanApp::buildLightViewProjectionMatrix(const glm::vec3& lightDirection) const {
+    const int activeRenderDistance = renderDistanceChunks.load(std::memory_order_relaxed);
+    const float chunkExtent = static_cast<float>((activeRenderDistance + kKeepRadiusExtra + 2) * kChunkSize);
+    const float shadowNear = 1.5f;
+    const float shadowFar = std::clamp(chunkExtent * 0.55f, 72.0f, 180.0f);
+    const float aspect = swapchainExtent.height == 0
+                             ? 1.0f
+                             : swapchainExtent.width / static_cast<float>(swapchainExtent.height);
+
+    glm::mat4 shadowCameraProjection = glm::perspective(glm::radians(45.0f), aspect, shadowNear, shadowFar);
+    shadowCameraProjection[1][1] *= -1.0f;
+    const glm::mat4 inverseViewProjection = glm::inverse(shadowCameraProjection * camera.viewMatrix());
+
+    std::array<glm::vec3, 8> frustumCorners{};
+    size_t cornerIndex = 0;
+    for (int depthIndex = 0; depthIndex < 2; ++depthIndex) {
+        const float clipZ = depthIndex == 0 ? 0.0f : 1.0f;
+        for (int yIndex = 0; yIndex < 2; ++yIndex) {
+            const float clipY = yIndex == 0 ? -1.0f : 1.0f;
+            for (int xIndex = 0; xIndex < 2; ++xIndex) {
+                const float clipX = xIndex == 0 ? -1.0f : 1.0f;
+                const glm::vec4 worldCorner = inverseViewProjection * glm::vec4(clipX, clipY, clipZ, 1.0f);
+                frustumCorners[cornerIndex++] = glm::vec3(worldCorner) / worldCorner.w;
+            }
+        }
+    }
+
+    glm::vec3 frustumCenter(0.0f);
+    for (const glm::vec3& corner : frustumCorners) {
+        frustumCenter += corner;
+    }
+    frustumCenter /= static_cast<float>(frustumCorners.size());
+
+    const glm::vec3 upHint = std::abs(lightDirection.y) > 0.98f ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    const glm::vec3 lightPosition = frustumCenter - lightDirection * (shadowFar + chunkExtent * 0.25f + 64.0f);
+    const glm::mat4 lightView = glm::lookAt(lightPosition, frustumCenter, upHint);
+
+    glm::vec3 minBounds((std::numeric_limits<float>::max)());
+    glm::vec3 maxBounds(std::numeric_limits<float>::lowest());
+    for (const glm::vec3& corner : frustumCorners) {
+        const glm::vec3 lightSpaceCorner = glm::vec3(lightView * glm::vec4(corner, 1.0f));
+        minBounds = (glm::min)(minBounds, lightSpaceCorner);
+        maxBounds = (glm::max)(maxBounds, lightSpaceCorner);
+    }
+
+    const float xyPadding = 12.0f;
+    minBounds.x -= xyPadding;
+    maxBounds.x += xyPadding;
+    minBounds.y -= xyPadding;
+    maxBounds.y += xyPadding;
+
+    const float extentX = maxBounds.x - minBounds.x;
+    const float extentY = maxBounds.y - minBounds.y;
+    const float texelSizeX = extentX / static_cast<float>(shadowMapExtent.width);
+    const float texelSizeY = extentY / static_cast<float>(shadowMapExtent.height);
+    const float snappedCenterX = std::round(((minBounds.x + maxBounds.x) * 0.5f) / texelSizeX) * texelSizeX;
+    const float snappedCenterY = std::round(((minBounds.y + maxBounds.y) * 0.5f) / texelSizeY) * texelSizeY;
+    const float halfExtentX = extentX * 0.5f;
+    const float halfExtentY = extentY * 0.5f;
+    minBounds.x = snappedCenterX - halfExtentX;
+    maxBounds.x = snappedCenterX + halfExtentX;
+    minBounds.y = snappedCenterY - halfExtentY;
+    maxBounds.y = snappedCenterY + halfExtentY;
+
+    const float nearPlane = std::max(0.1f, -maxBounds.z - 96.0f);
+    const float farPlane = std::max(nearPlane + 1.0f, -minBounds.z + 96.0f);
+    glm::mat4 lightProj = glm::ortho(minBounds.x, maxBounds.x, minBounds.y, maxBounds.y, nearPlane, farPlane);
+    lightProj[1][1] *= -1.0f;
+    return lightProj * lightView;
 }
 
 /**
@@ -1875,7 +2228,7 @@ void VulkanApp::buildVoxelMeshAsync() {
 
     auto startMeshTime = std::chrono::high_resolution_clock::now();
 
-    std::vector<std::vector<PendingChunkMesh>> threadChunkMeshes(numThreads);
+    std::vector<std::vector<PendingChunkMeshBatch>> threadChunkMeshes(numThreads);
 
     std::vector<std::thread> threads;
     for (size_t t = 0; t < numThreads; ++t) {
@@ -1887,7 +2240,7 @@ void VulkanApp::buildVoxelMeshAsync() {
 
             for (size_t i = startIdx; i < endIdx; ++i) {
                 const ChunkCoord coord = chunkCoords[i];
-                PendingChunkMesh chunkMesh = buildChunkMeshData(coord);
+                PendingChunkMeshBatch chunkMesh = buildChunkMeshData(coord);
                 if (chunkMesh.hasGeometry) {
                     threadResults.push_back(std::move(chunkMesh));
                 }
@@ -1909,15 +2262,17 @@ void VulkanApp::buildVoxelMeshAsync() {
 
     uint32_t vertexOffset = 0;
     for (size_t t = 0; t < numThreads; ++t) {
-        for (const PendingChunkMesh& chunkMesh : threadChunkMeshes[t]) {
-            pendingVertices.insert(pendingVertices.end(), chunkMesh.vertices.begin(), chunkMesh.vertices.end());
-            for (uint32_t idx : chunkMesh.indices) {
-                pendingIndices.push_back(idx + vertexOffset);
+        for (const PendingChunkMeshBatch& chunkBatch : threadChunkMeshes[t]) {
+            for (const PendingChunkMesh& chunkMesh : chunkBatch.regionMeshes) {
+                pendingVertices.insert(pendingVertices.end(), chunkMesh.vertices.begin(), chunkMesh.vertices.end());
+                for (uint32_t idx : chunkMesh.indices) {
+                    pendingIndices.push_back(idx + vertexOffset);
+                }
+                vertexOffset += static_cast<uint32_t>(chunkMesh.vertices.size());
+                minCorner = (glm::min)(minCorner, chunkMesh.minCorner);
+                maxCorner = (glm::max)(maxCorner, chunkMesh.maxCorner);
+                hasGeometry = true;
             }
-            vertexOffset += static_cast<uint32_t>(chunkMesh.vertices.size());
-            minCorner = (glm::min)(minCorner, chunkMesh.minCorner);
-            maxCorner = (glm::max)(maxCorner, chunkMesh.maxCorner);
-            hasGeometry = true;
         }
     }
 
@@ -1984,69 +2339,101 @@ void VulkanApp::uploadPendingMesh() {
  * In: Function parameters.
  * Out: Chunk coordinate value.
  */
-VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coord) {
-    PendingChunkMesh result{};
-    result.coord = coord;
+bool VulkanApp::captureChunkNeighborhood(const ChunkCoord& coord, ChunkNeighborhoodSnapshots& snapshots) const {
+    std::shared_lock<std::shared_mutex> worldLock(worldDataMutex);
+    const Chunk* chunk = world.findChunk(coord);
+    if (chunk == nullptr) {
+        return false;
+    }
 
-    Chunk chunkSnapshot{};
-    Chunk neighborXNNnapshot{};
-    Chunk neighborXPSnapshot{};
-    Chunk neighborYNSnapshot{};
-    Chunk neighborYPSnapshot{};
-    Chunk neighborZNSnapshot{};
-    Chunk neighborZPSnapshot{};
-    bool hasNeighborXN = false;
-    bool hasNeighborXP = false;
-    bool hasNeighborYN = false;
-    bool hasNeighborYP = false;
-    bool hasNeighborZN = false;
-    bool hasNeighborZP = false;
+    snapshots.chunk = *chunk;
 
-    {
-        std::shared_lock<std::shared_mutex> worldLock(worldDataMutex);
-        const Chunk* chunk = world.findChunk(coord);
-        if (!chunk) {
-            return result;
-        }
+    if (const Chunk* neighbor = world.findChunk({coord.x - 1, coord.y, coord.z}); neighbor != nullptr) {
+        snapshots.neighborXN = *neighbor;
+        snapshots.hasNeighborXN = true;
+    }
+    if (const Chunk* neighbor = world.findChunk({coord.x + 1, coord.y, coord.z}); neighbor != nullptr) {
+        snapshots.neighborXP = *neighbor;
+        snapshots.hasNeighborXP = true;
+    }
+    if (const Chunk* neighbor = world.findChunk({coord.x, coord.y - 1, coord.z}); neighbor != nullptr) {
+        snapshots.neighborYN = *neighbor;
+        snapshots.hasNeighborYN = true;
+    }
+    if (const Chunk* neighbor = world.findChunk({coord.x, coord.y + 1, coord.z}); neighbor != nullptr) {
+        snapshots.neighborYP = *neighbor;
+        snapshots.hasNeighborYP = true;
+    }
+    if (const Chunk* neighbor = world.findChunk({coord.x, coord.y, coord.z - 1}); neighbor != nullptr) {
+        snapshots.neighborZN = *neighbor;
+        snapshots.hasNeighborZN = true;
+    }
+    if (const Chunk* neighbor = world.findChunk({coord.x, coord.y, coord.z + 1}); neighbor != nullptr) {
+        snapshots.neighborZP = *neighbor;
+        snapshots.hasNeighborZP = true;
+    }
 
-        chunkSnapshot = *chunk;
+    return true;
+}
 
-        if (const Chunk* neighbor = world.findChunk({coord.x - 1, coord.y, coord.z}); neighbor != nullptr) {
-            neighborXNNnapshot = *neighbor;
-            hasNeighborXN = true;
-        }
-        if (const Chunk* neighbor = world.findChunk({coord.x + 1, coord.y, coord.z}); neighbor != nullptr) {
-            neighborXPSnapshot = *neighbor;
-            hasNeighborXP = true;
-        }
-        if (const Chunk* neighbor = world.findChunk({coord.x, coord.y - 1, coord.z}); neighbor != nullptr) {
-            neighborYNSnapshot = *neighbor;
-            hasNeighborYN = true;
-        }
-        if (const Chunk* neighbor = world.findChunk({coord.x, coord.y + 1, coord.z}); neighbor != nullptr) {
-            neighborYPSnapshot = *neighbor;
-            hasNeighborYP = true;
-        }
-        if (const Chunk* neighbor = world.findChunk({coord.x, coord.y, coord.z - 1}); neighbor != nullptr) {
-            neighborZNSnapshot = *neighbor;
-            hasNeighborZN = true;
-        }
-        if (const Chunk* neighbor = world.findChunk({coord.x, coord.y, coord.z + 1}); neighbor != nullptr) {
-            neighborZPSnapshot = *neighbor;
-            hasNeighborZP = true;
+VulkanApp::PendingChunkMeshBatch VulkanApp::buildChunkMeshData(const ChunkCoord& coord) {
+    PendingChunkMeshBatch batch{};
+    batch.coord = coord;
+
+    ChunkNeighborhoodSnapshots snapshots{};
+    if (!captureChunkNeighborhood(coord, snapshots)) {
+        return batch;
+    }
+
+    static_assert(Chunk::SIZE % kMeshRegionSize == 0, "Mesh region size must evenly divide chunk size.");
+    constexpr int regionsPerAxis = Chunk::SIZE / kMeshRegionSize;
+    batch.regionMeshes.reserve(static_cast<size_t>(regionsPerAxis * regionsPerAxis * regionsPerAxis));
+
+    for (int regionZ = 0; regionZ < regionsPerAxis; ++regionZ) {
+        for (int regionY = 0; regionY < regionsPerAxis; ++regionY) {
+            for (int regionX = 0; regionX < regionsPerAxis; ++regionX) {
+                PendingChunkMesh::MeshRegionCoord regionCoord{};
+                regionCoord.chunk = coord;
+                regionCoord.regionX = static_cast<uint8_t>(regionX);
+                regionCoord.regionY = static_cast<uint8_t>(regionY);
+                regionCoord.regionZ = static_cast<uint8_t>(regionZ);
+
+                PendingChunkMesh regionMesh = buildChunkRegionMeshData(regionCoord, snapshots);
+                if (!regionMesh.hasGeometry) {
+                    continue;
+                }
+
+                batch.regionMeshes.push_back(std::move(regionMesh));
+                batch.hasGeometry = true;
+            }
         }
     }
 
+    return batch;
+}
+
+VulkanApp::PendingChunkMesh VulkanApp::buildChunkRegionMeshData(const PendingChunkMesh::MeshRegionCoord& regionCoord, const ChunkNeighborhoodSnapshots& snapshots) const {
+    PendingChunkMesh result{};
+    result.coord = regionCoord;
+
     constexpr int chunkSize = Chunk::SIZE;
-    const int baseX = coord.x * chunkSize;
-    const int baseY = coord.y * chunkSize;
-    const int baseZ = coord.z * chunkSize;
+    constexpr int regionSize = kMeshRegionSize;
+    const int regionMinX = static_cast<int>(regionCoord.regionX) * regionSize;
+    const int regionMinY = static_cast<int>(regionCoord.regionY) * regionSize;
+    const int regionMinZ = static_cast<int>(regionCoord.regionZ) * regionSize;
+    const int regionMaxX = (std::min)(chunkSize, regionMinX + regionSize);
+    const int regionMaxY = (std::min)(chunkSize, regionMinY + regionSize);
+    const int regionMaxZ = (std::min)(chunkSize, regionMinZ + regionSize);
+
+    const Chunk& chunkSnapshot = snapshots.chunk;
+    const int baseX = regionCoord.chunk.x * chunkSize;
+    const int baseY = regionCoord.chunk.y * chunkSize;
+    const int baseZ = regionCoord.chunk.z * chunkSize;
 
     result.minCorner = glm::vec3((std::numeric_limits<float>::max)());
     result.maxCorner = glm::vec3(std::numeric_limits<float>::lowest());
-
-    result.vertices.reserve(24 * chunkSize * chunkSize);
-    result.indices.reserve(36 * chunkSize * chunkSize);
+    result.vertices.reserve(24 * regionSize * regionSize);
+    result.indices.reserve(36 * regionSize * regionSize);
 
     struct VertexKey {
         int32_t px;
@@ -2055,10 +2442,14 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
         uint8_t cr;
         uint8_t cg;
         uint8_t cb;
+        int8_t nx;
+        int8_t ny;
+        int8_t nz;
 
         bool operator==(const VertexKey& other) const noexcept {
             return px == other.px && py == other.py && pz == other.pz
-                && cr == other.cr && cg == other.cg && cb == other.cb;
+                && cr == other.cr && cg == other.cg && cb == other.cb
+                && nx == other.nx && ny == other.ny && nz == other.nz;
         }
     };
 
@@ -2069,14 +2460,19 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
             h ^= std::hash<int32_t>{}(key.pz) + 0x9e3779b9 + (h << 6) + (h >> 2);
             h ^= std::hash<uint32_t>{}(static_cast<uint32_t>(key.cr) | (static_cast<uint32_t>(key.cg) << 8) | (static_cast<uint32_t>(key.cb) << 16))
                 + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= std::hash<uint32_t>{}(
+                (static_cast<uint32_t>(static_cast<uint8_t>(key.nx)) << 16)
+                | (static_cast<uint32_t>(static_cast<uint8_t>(key.ny)) << 8)
+                | static_cast<uint32_t>(static_cast<uint8_t>(key.nz))
+            ) + 0x9e3779b9 + (h << 6) + (h >> 2);
             return h;
         }
     };
 
     std::unordered_map<VertexKey, uint32_t, VertexKeyHash> vertexLookup;
-    vertexLookup.reserve(24 * chunkSize * chunkSize);
+    vertexLookup.reserve(24 * regionSize * regionSize);
 
-    const auto toVertexKey = [](const glm::vec3& position, const glm::vec3& colour) {
+    const auto toVertexKey = [](const glm::vec3& position, const glm::vec3& colour, const glm::ivec3& normal) {
         const auto toByte = [](float c) -> uint8_t {
             return static_cast<uint8_t>(std::clamp(static_cast<int>(std::lround(c * 255.0f)), 0, 255));
         };
@@ -2087,7 +2483,10 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
             static_cast<int32_t>(std::lround(position.z)),
             toByte(colour.r),
             toByte(colour.g),
-            toByte(colour.b)
+            toByte(colour.b),
+            static_cast<int8_t>(normal.x),
+            static_cast<int8_t>(normal.y),
+            static_cast<int8_t>(normal.z)
         };
     };
 
@@ -2102,22 +2501,22 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
         int sampleZ = nz;
 
         if (nx < 0) {
-            neighborChunk = hasNeighborXN ? &neighborXNNnapshot : nullptr;
+            neighborChunk = snapshots.hasNeighborXN ? &snapshots.neighborXN : nullptr;
             sampleX += chunkSize;
         } else if (nx >= chunkSize) {
-            neighborChunk = hasNeighborXP ? &neighborXPSnapshot : nullptr;
+            neighborChunk = snapshots.hasNeighborXP ? &snapshots.neighborXP : nullptr;
             sampleX -= chunkSize;
         } else if (ny < 0) {
-            neighborChunk = hasNeighborYN ? &neighborYNSnapshot : nullptr;
+            neighborChunk = snapshots.hasNeighborYN ? &snapshots.neighborYN : nullptr;
             sampleY += chunkSize;
         } else if (ny >= chunkSize) {
-            neighborChunk = hasNeighborYP ? &neighborYPSnapshot : nullptr;
+            neighborChunk = snapshots.hasNeighborYP ? &snapshots.neighborYP : nullptr;
             sampleY -= chunkSize;
         } else if (nz < 0) {
-            neighborChunk = hasNeighborZN ? &neighborZNSnapshot : nullptr;
+            neighborChunk = snapshots.hasNeighborZN ? &snapshots.neighborZN : nullptr;
             sampleZ += chunkSize;
         } else {
-            neighborChunk = hasNeighborZP ? &neighborZPSnapshot : nullptr;
+            neighborChunk = snapshots.hasNeighborZP ? &snapshots.neighborZP : nullptr;
             sampleZ -= chunkSize;
         }
 
@@ -2210,14 +2609,14 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
         std::array<uint32_t, 4> cornerIndices{};
         for (size_t cornerIndex = 0; cornerIndex < corners.size(); ++cornerIndex) {
             const glm::vec3& position = corners[cornerIndex];
-            const VertexKey key = toVertexKey(position, colour);
+            const VertexKey key = toVertexKey(position, colour, normal);
 
             const auto it = vertexLookup.find(key);
             if (it != vertexLookup.end()) {
                 cornerIndices[cornerIndex] = it->second;
             } else {
                 const uint32_t newIndex = static_cast<uint32_t>(result.vertices.size());
-                result.vertices.push_back(Vertex{position, colour});
+                result.vertices.push_back(Vertex{position, colour, glm::vec3(normal)});
                 vertexLookup.emplace(key, newIndex);
                 cornerIndices[cornerIndex] = newIndex;
             }
@@ -2234,15 +2633,57 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
         result.indices.push_back(cornerIndices[3]);
     };
 
-    std::vector<uint8_t> mask(static_cast<size_t>(chunkSize * chunkSize), 0);
     for (int faceIndex = 0; faceIndex < static_cast<int>(gFaceDefinitions.size()); ++faceIndex) {
         const glm::ivec3 normal = gFaceDefinitions[static_cast<size_t>(faceIndex)].normal;
 
-        for (int slice = 0; slice < chunkSize; ++slice) {
+        int sliceBegin = 0;
+        int sliceEnd = 0;
+        int uBegin = 0;
+        int uEnd = 0;
+        int vBegin = 0;
+        int vEnd = 0;
+
+        switch (faceIndex) {
+            case 0:
+            case 1:
+                sliceBegin = regionMinZ;
+                sliceEnd = regionMaxZ;
+                uBegin = regionMinX;
+                uEnd = regionMaxX;
+                vBegin = regionMinY;
+                vEnd = regionMaxY;
+                break;
+            case 2:
+            case 3:
+                sliceBegin = regionMinX;
+                sliceEnd = regionMaxX;
+                uBegin = regionMinZ;
+                uEnd = regionMaxZ;
+                vBegin = regionMinY;
+                vEnd = regionMaxY;
+                break;
+            default:
+                sliceBegin = regionMinY;
+                sliceEnd = regionMaxY;
+                uBegin = regionMinX;
+                uEnd = regionMaxX;
+                vBegin = regionMinZ;
+                vEnd = regionMaxZ;
+                break;
+        }
+
+        const int uCount = uEnd - uBegin;
+        const int vCount = vEnd - vBegin;
+        std::vector<uint8_t> mask(static_cast<size_t>(uCount * vCount), 0);
+
+        for (int slice = sliceBegin; slice < sliceEnd; ++slice) {
             std::fill(mask.begin(), mask.end(), 0);
 
-            for (int v = 0; v < chunkSize; ++v) {
-                for (int u = 0; u < chunkSize; ++u) {
+            for (int vIndex = 0; vIndex < vCount; ++vIndex) {
+                const int v = vBegin + vIndex;
+                for (int uIndex = 0; uIndex < uCount; ++uIndex) {
+                    const int u = uBegin + uIndex;
+
                     int localX = 0;
                     int localY = 0;
                     int localZ = 0;
@@ -2272,13 +2713,13 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
                         continue;
                     }
 
-                        if (!kEmitBottomFaces && normal.y < 0) {
-                            continue;
-                        }
+                    if (!kEmitBottomFaces && normal.y < 0) {
+                        continue;
+                    }
 
-                        if (!kEmitWaterSideAndBottomFaces && voxel.type == 3 && normal.y <= 0) {
-                            continue;
-                        }
+                    if (!kEmitWaterSideAndBottomFaces && voxel.type == 3 && normal.y <= 0) {
+                        continue;
+                    }
 
                     const int nx = localX + normal.x;
                     const int ny = localY + normal.y;
@@ -2287,28 +2728,28 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
                         continue;
                     }
 
-                    mask[static_cast<size_t>(v * chunkSize + u)] = voxel.type;
+                    mask[static_cast<size_t>(vIndex * uCount + uIndex)] = voxel.type;
                 }
             }
 
-            for (int v = 0; v < chunkSize; ++v) {
-                for (int u = 0; u < chunkSize; ) {
-                    const uint8_t voxelType = mask[static_cast<size_t>(v * chunkSize + u)];
+            for (int vIndex = 0; vIndex < vCount; ++vIndex) {
+                for (int uIndex = 0; uIndex < uCount;) {
+                    const uint8_t voxelType = mask[static_cast<size_t>(vIndex * uCount + uIndex)];
                     if (voxelType == 0) {
-                        ++u;
+                        ++uIndex;
                         continue;
                     }
 
                     int width = 1;
-                    while (u + width < chunkSize && mask[static_cast<size_t>(v * chunkSize + (u + width))] == voxelType) {
+                    while (uIndex + width < uCount && mask[static_cast<size_t>(vIndex * uCount + (uIndex + width))] == voxelType) {
                         ++width;
                     }
 
                     int height = 1;
                     bool canGrow = true;
-                    while (v + height < chunkSize && canGrow) {
-                        for (int k = 0; k < width; ++k) {
-                            if (mask[static_cast<size_t>((v + height) * chunkSize + (u + k))] != voxelType) {
+                    while (vIndex + height < vCount && canGrow) {
+                        for (int offset = 0; offset < width; ++offset) {
+                            if (mask[static_cast<size_t>((vIndex + height) * uCount + (uIndex + offset))] != voxelType) {
                                 canGrow = false;
                                 break;
                             }
@@ -2318,15 +2759,15 @@ VulkanApp::PendingChunkMesh VulkanApp::buildChunkMeshData(const ChunkCoord& coor
                         }
                     }
 
-                    appendFaceQuad(faceIndex, slice, u, v, width, height, voxelType);
+                    appendFaceQuad(faceIndex, slice, uBegin + uIndex, vBegin + vIndex, width, height, voxelType);
 
-                    for (int dy = 0; dy < height; ++dy) {
-                        for (int dx = 0; dx < width; ++dx) {
-                            mask[static_cast<size_t>((v + dy) * chunkSize + (u + dx))] = 0;
+                    for (int clearV = 0; clearV < height; ++clearV) {
+                        for (int clearU = 0; clearU < width; ++clearU) {
+                            mask[static_cast<size_t>((vIndex + clearV) * uCount + (uIndex + clearU))] = 0;
                         }
                     }
 
-                    u += width;
+                    uIndex += width;
                 }
             }
         }
@@ -2475,6 +2916,7 @@ void VulkanApp::clearAllChunkMeshes() {
         destroyChunkMeshResources(mesh);
     }
     activeChunkMeshes.clear();
+    activeChunkMeshCounts.clear();
     completedEmptyChunkSet.clear();
 
     for (auto& entry : deferredDestroyQueue) {
@@ -2510,6 +2952,11 @@ void VulkanApp::clearAllChunkMeshes() {
         }
     }
     pendingUploadBatches.clear();
+}
+
+bool VulkanApp::chunkHasActiveMesh(const ChunkCoord& coord) const {
+    const auto it = activeChunkMeshCounts.find(coord);
+    return it != activeChunkMeshCounts.end() && it->second > 0;
 }
 
 /**
@@ -2617,15 +3064,27 @@ void VulkanApp::processCompletedUploadBatches() {
 
         {
             std::lock_guard<std::mutex> lock(chunkQueueMutex);
+            std::unordered_set<ChunkCoord, ChunkCoordHash> refreshedChunks;
             for (auto& ready : batch.readyMeshes) {
-                completedEmptyChunkSet.erase(ready.first);
-                auto existing = activeChunkMeshes.find(ready.first);
-                if (existing != activeChunkMeshes.end()) {
-                    enqueueChunkMeshForDestruction(std::move(existing->second));
-                    existing->second = std::move(ready.second);
-                } else {
-                    activeChunkMeshes[ready.first] = std::move(ready.second);
+                refreshedChunks.insert(ready.first.chunk);
+            }
+
+            for (const ChunkCoord& chunkCoord : refreshedChunks) {
+                completedEmptyChunkSet.erase(chunkCoord);
+                activeChunkMeshCounts.erase(chunkCoord);
+                for (auto it = activeChunkMeshes.begin(); it != activeChunkMeshes.end();) {
+                    if (it->first.chunk == chunkCoord) {
+                        enqueueChunkMeshForDestruction(std::move(it->second));
+                        it = activeChunkMeshes.erase(it);
+                    } else {
+                        ++it;
+                    }
                 }
+            }
+
+            for (auto& ready : batch.readyMeshes) {
+                activeChunkMeshes[ready.first] = std::move(ready.second);
+                ++activeChunkMeshCounts[ready.first.chunk];
                 boundsDirty = true;
             }
         }

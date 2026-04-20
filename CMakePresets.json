@@ -1,0 +1,50 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 10,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "vs2022-debug",
+            "displayName": "VS2022 Debug",
+            "generator": "Visual Studio 17 2022",
+            "architecture": "x64",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/install"
+            }
+        },
+        {
+            "name": "vs2022-release",
+            "displayName": "VS2022 Release",
+            "inherits": "vs2022-debug"
+        },
+        {
+            "name": "vs2022-relwithdebinfo",
+            "displayName": "VS2022 RelWithDebInfo",
+            "inherits": "vs2022-debug"
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "build-debug",
+            "displayName": "Build Debug",
+            "configurePreset": "vs2022-debug",
+            "configuration": "Debug"
+        },
+        {
+            "name": "build-release",
+            "displayName": "Build Release",
+            "configurePreset": "vs2022-release",
+            "configuration": "Release"
+        },
+        {
+            "name": "build-relwithdebinfo",
+            "displayName": "Build RelWithDebInfo",
+            "configurePreset": "vs2022-relwithdebinfo",
+            "configuration": "RelWithDebInfo"
+        }
+    ]
+}

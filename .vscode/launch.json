@@ -2,12 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch VulkanProject",
+            "name": "Launch VulkanProject (Release)",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/bin/VulkanProject.exe",
+            "program": "${workspaceFolder}/build/bin/Release/VulkanProject.exe",
             "args": [],
             "stopAtEntry": false,
+            "preLaunchTask": "CMake: Build (Release)",
             "cwd": "${workspaceFolder}",
             "environment": [],
             "console": "integratedTerminal"

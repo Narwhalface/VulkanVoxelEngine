@@ -1,0 +1,10 @@
+^C:\DEV\VULKANVOXELENGINE\BUILD\CMAKEFILES\DCFA11267798BA05D3E718DD1B438D30\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Dev/VulkanVoxelEngine -BC:/Dev/VulkanVoxelEngine/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Dev/VulkanVoxelEngine/build/VulkanProject.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

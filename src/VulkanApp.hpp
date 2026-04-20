@@ -33,6 +33,7 @@
 struct Vertex {
     glm::vec3 pos;
     glm::vec3 color;
+    glm::vec3 normal;
 
     /**
      * Returns the Vulkan vertex binding description for the Vertex struct.
@@ -40,10 +41,10 @@ struct Vertex {
      */
     static VkVertexInputBindingDescription getBindingDescription();
     /**
-     * Returns Vulkan vertex attribute descriptions for position and color.
-     * @return Array of attribute descriptions matching Vertex::pos and Vertex::color.
+     * Returns Vulkan vertex attribute descriptions for position, color, and normal.
+     * @return Array of attribute descriptions matching Vertex::pos, Vertex::color, and Vertex::normal.
      */
-    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions();
+    static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions();
 };
 
 class VulkanApp {
@@ -103,12 +104,56 @@ public:
 
 private:
     struct PendingChunkMesh {
-        ChunkCoord coord;
+        struct MeshRegionCoord {
+            ChunkCoord chunk;
+            uint8_t regionX = 0;
+            uint8_t regionY = 0;
+            uint8_t regionZ = 0;
+
+            bool operator==(const MeshRegionCoord& other) const noexcept {
+                return chunk == other.chunk
+                    && regionX == other.regionX
+                    && regionY == other.regionY
+                    && regionZ == other.regionZ;
+            }
+        } coord;
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
         glm::vec3 minCorner{0.0f};
         glm::vec3 maxCorner{0.0f};
         bool hasGeometry = false;
+    };
+
+    struct MeshRegionCoordHash {
+        std::size_t operator()(const PendingChunkMesh::MeshRegionCoord& coord) const noexcept {
+            std::size_t hash = ChunkCoordHash{}(coord.chunk);
+            hash ^= std::hash<uint32_t>{}(coord.regionX) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+            hash ^= std::hash<uint32_t>{}(coord.regionY) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+            hash ^= std::hash<uint32_t>{}(coord.regionZ) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+            return hash;
+        }
+    };
+
+    struct PendingChunkMeshBatch {
+        ChunkCoord coord;
+        std::vector<PendingChunkMesh> regionMeshes;
+        bool hasGeometry = false;
+    };
+
+    struct ChunkNeighborhoodSnapshots {
+        Chunk chunk;
+        Chunk neighborXN;
+        Chunk neighborXP;
+        Chunk neighborYN;
+        Chunk neighborYP;
+        Chunk neighborZN;
+        Chunk neighborZP;
+        bool hasNeighborXN = false;
+        bool hasNeighborXP = false;
+        bool hasNeighborYN = false;
+        bool hasNeighborYP = false;
+        bool hasNeighborZN = false;
+        bool hasNeighborZP = false;
     };
 
     struct GpuChunkMesh {
@@ -138,7 +183,7 @@ private:
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkFence fence = VK_NULL_HANDLE;
         std::vector<UploadStagingBuffers> stagingBuffers;
-        std::vector<std::pair<ChunkCoord, GpuChunkMesh>> readyMeshes;
+        std::vector<std::pair<PendingChunkMesh::MeshRegionCoord, GpuChunkMesh>> readyMeshes;
     };
 
     struct QueueFamilyIndices {
@@ -163,6 +208,13 @@ private:
         alignas(16) glm::mat4 model;
         glm::mat4 view;
         glm::mat4 proj;
+        glm::mat4 lightViewProj;
+        glm::vec4 lightDirection;
+        glm::vec4 lightColor;
+        glm::vec4 ambientColor;
+        glm::vec4 cameraPosition;
+        glm::vec4 shadowParams;
+        glm::vec4 debugParams;
     };
 
     /**
@@ -200,6 +252,16 @@ private:
      * @return No return value.
      */
     void createRenderPass();
+    /**
+     * Creates shadow-map image, view, and sampler resources.
+     * @return No return value.
+     */
+    void createShadowResources();
+    /**
+     * Creates the depth-only render pass used for the shadow map.
+     * @return No return value.
+     */
+    void createShadowRenderPass();
     /**
      * Creates pipeline state and graphics pipeline objects.
      * @return No return value.
@@ -274,6 +336,11 @@ private:
      */
     VkFormat findDepthFormat() const;
     /**
+     * Finds a depth format suitable for both shadow rendering and shader sampling.
+     * @return Chosen shadow-map depth format.
+     */
+    VkFormat findShadowMapFormat() const;
+    /**
      * Finds the first supported format from a candidate list.
      * @param candidates Candidate formats to evaluate.
      * @param tiling Required tiling mode.
@@ -337,6 +404,12 @@ private:
      */
     void updateUniformBuffer(uint32_t currentImage);
     /**
+     * Builds a light-space view-projection matrix for directional shadows.
+     * @param lightDirection Normalized world-space direction the light travels.
+     * @return Light view-projection matrix.
+     */
+    glm::mat4 buildLightViewProjectionMatrix(const glm::vec3& lightDirection) const;
+    /**
      * Finds a compatible memory type index on the physical device.
      * @param typeFilter Bitmask of acceptable memory types.
      * @param properties Required memory properties.
@@ -396,7 +469,9 @@ private:
      * @param coord Chunk coordinate to mesh.
      * @return Pending mesh payload and bounds for upload.
      */
-    PendingChunkMesh buildChunkMeshData(const ChunkCoord& coord);
+    PendingChunkMeshBatch buildChunkMeshData(const ChunkCoord& coord);
+    bool captureChunkNeighborhood(const ChunkCoord& coord, ChunkNeighborhoodSnapshots& snapshots) const;
+    PendingChunkMesh buildChunkRegionMeshData(const PendingChunkMesh::MeshRegionCoord& regionCoord, const ChunkNeighborhoodSnapshots& snapshots) const;
     /**
      * Uploads completed chunk meshes to GPU buffers.
      * @return No return value.
@@ -434,6 +509,7 @@ private:
      * @return No return value.
      */
     void clearAllChunkMeshes();
+    bool chunkHasActiveMesh(const ChunkCoord& coord) const;
 
     /**
      * Verifies requested Vulkan validation layers are available.
@@ -498,19 +574,29 @@ private:
     VkQueue          presentQueue   = VK_NULL_HANDLE;
     QueueFamilyIndices selectedQueues;
     VkRenderPass     renderPass     = VK_NULL_HANDLE;
+    VkRenderPass     shadowRenderPass = VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout  = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+    VkPipeline shadowPipeline = VK_NULL_HANDLE;
     VkSwapchainKHR   swapchain            = VK_NULL_HANDLE;
     VkFormat         swapchainImageFormat = VK_FORMAT_UNDEFINED;
     VkExtent2D       swapchainExtent{};
+    static constexpr uint32_t kShadowMapSize = 4096;
+    VkExtent2D       shadowMapExtent{kShadowMapSize, kShadowMapSize};
     std::vector<VkImage>     swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
     std::vector<VkFramebuffer> swapchainFramebuffers;
+    VkFramebuffer shadowFramebuffer = VK_NULL_HANDLE;
     std::vector<VkImage> depthImages;
     std::vector<VkDeviceMemory> depthImageMemories;
     std::vector<VkImageView> depthImageViews;
+    VkImage shadowImage = VK_NULL_HANDLE;
+    VkDeviceMemory shadowImageMemory = VK_NULL_HANDLE;
+    VkImageView shadowImageView = VK_NULL_HANDLE;
+    VkSampler shadowSampler = VK_NULL_HANDLE;
+    VkFormat shadowImageFormat = VK_FORMAT_UNDEFINED;
     VkFormat depthImageFormat = VK_FORMAT_UNDEFINED;
     VkCommandPool    commandPool    = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer>  commandBuffers;
@@ -531,6 +617,7 @@ private:
 
     std::vector<Vertex> voxelVertices;
     std::vector<uint32_t> voxelIndices;
+    static constexpr int kMeshRegionSize = 8;
     static constexpr int kChunkUploadsPerFrame = 12;
     static constexpr int kPrefetchRadiusExtra = 2;
     static constexpr int kKeepRadiusExtra = 3;
@@ -571,10 +658,11 @@ private:
     std::unordered_set<ChunkCoord, ChunkCoordHash> keepChunkSet;
     std::unordered_set<ChunkCoord, ChunkCoordHash> queuedOrGeneratingChunkSet;
     std::unordered_set<ChunkCoord, ChunkCoordHash> queuedOrMeshingChunkSet;
-    std::deque<PendingChunkMesh> completedChunkMeshes;
+    std::deque<PendingChunkMeshBatch> completedChunkMeshes;
     std::deque<DeferredDestroyEntry> deferredDestroyQueue;
     std::deque<PendingUploadBatch> pendingUploadBatches;
-    std::unordered_map<ChunkCoord, GpuChunkMesh, ChunkCoordHash> activeChunkMeshes;
+    std::unordered_map<PendingChunkMesh::MeshRegionCoord, GpuChunkMesh, MeshRegionCoordHash> activeChunkMeshes;
+    std::unordered_map<ChunkCoord, uint32_t, ChunkCoordHash> activeChunkMeshCounts;
     std::unordered_set<ChunkCoord, ChunkCoordHash> completedEmptyChunkSet;
     std::mutex chunkQueueMutex;
     std::mutex completedChunkMutex;

@@ -16,7 +16,10 @@ namespace {
 constexpr int kChunkSize = Chunk::SIZE;
 constexpr bool kLogRenderedChunkStats = false;
 constexpr float kVisibilityDistancePadding = static_cast<float>(kChunkSize) * 2.0f;
+constexpr double kFpsReportIntervalSeconds = 1.0;
 double gSmoothedFrameTimeMs = 16.6;
+double gFpsReportElapsedSeconds = 0.0;
+uint32_t gFpsReportFrameCount = 0;
 
 struct DrawChunkEntry {
     VkBuffer vertexBuffer = VK_NULL_HANDLE;
@@ -68,6 +71,52 @@ std::array<glm::vec4, 6> extractFrustumPlanes(const glm::mat4& viewProjection) {
 
     return planes;
 }
+
+/**
+ * Computes a priority score for chunk streaming work relative to the current center.
+ * @param coord Chunk being ranked.
+ * @param center Current streaming center chunk.
+ * @return Lower scores indicate higher priority.
+ */
+uint64_t streamingPriorityScore(const ChunkCoord& coord, const ChunkCoord& center) noexcept {
+    const int dx = std::abs(coord.x - center.x);
+    const int dy = std::abs(coord.y - center.y);
+    const int dz = std::abs(coord.z - center.z);
+    const int horizontalChebyshev = (std::max)(dx, dz);
+    const int horizontalDistanceSq = dx * dx + dz * dz;
+    const int verticalDistance = dy;
+
+    return (static_cast<uint64_t>(horizontalChebyshev) << 32)
+        | (static_cast<uint64_t>(verticalDistance) << 24)
+        | static_cast<uint64_t>(horizontalDistanceSq);
+}
+
+/**
+ * Inserts a chunk into a queue while preserving nearest-first ordering.
+ * @param queue Queue to mutate.
+ * @param coord Chunk coordinate being inserted.
+ * @param center Current streaming center used for priority.
+ * @return No return value.
+ */
+void insertChunkByPriority(std::deque<ChunkCoord>& queue, const ChunkCoord& coord, const ChunkCoord& center) {
+    const uint64_t targetScore = streamingPriorityScore(coord, center);
+    const auto insertIt = std::find_if(queue.begin(), queue.end(), [&](const ChunkCoord& existing) {
+        return targetScore < streamingPriorityScore(existing, center);
+    });
+    queue.insert(insertIt, coord);
+}
+
+/**
+ * Re-sorts a chunk queue so work nearest the current center executes first.
+ * @param queue Queue to sort in place.
+ * @param center Current streaming center used for priority.
+ * @return No return value.
+ */
+void reprioritizeChunkQueue(std::deque<ChunkCoord>& queue, const ChunkCoord& center) {
+    std::stable_sort(queue.begin(), queue.end(), [&](const ChunkCoord& lhs, const ChunkCoord& rhs) {
+        return streamingPriorityScore(lhs, center) < streamingPriorityScore(rhs, center);
+    });
+}
 }
 
 /**
@@ -82,6 +131,19 @@ void VulkanApp::drawFrame(VulkanApp& app) {
     deltaSeconds = std::clamp(deltaSeconds, 0.0, 0.25);
     const double frameTimeMs = deltaSeconds * 1000.0;
     gSmoothedFrameTimeMs = gSmoothedFrameTimeMs * 0.9 + frameTimeMs * 0.1;
+    gFpsReportElapsedSeconds += deltaSeconds;
+    ++gFpsReportFrameCount;
+
+    if (gFpsReportElapsedSeconds >= kFpsReportIntervalSeconds) {
+        const double averageFps = gFpsReportElapsedSeconds > 0.0
+            ? static_cast<double>(gFpsReportFrameCount) / gFpsReportElapsedSeconds
+            : 0.0;
+        std::cout
+            << "FPS: " << averageFps
+            << " | Frame time: " << gSmoothedFrameTimeMs << " ms\n";
+        gFpsReportElapsedSeconds = 0.0;
+        gFpsReportFrameCount = 0;
+    }
 
     if (app.swapchainExtent.width == 0 || app.swapchainExtent.height == 0) {
         return;
@@ -135,7 +197,7 @@ void VulkanApp::drawFrame(VulkanApp& app) {
                     const size_t desiredCount = app.desiredChunkSet.size();
                     const size_t coverageSlack = desiredCount > 64 ? 64 : 16;
                     for (const ChunkCoord& coord : app.desiredChunkSet) {
-                        const bool isActive = app.activeChunkMeshes.find(coord) != app.activeChunkMeshes.end();
+                        const bool isActive = app.chunkHasActiveMesh(coord);
                         const bool isEmptyComplete = app.completedEmptyChunkSet.find(coord) != app.completedEmptyChunkSet.end();
                         const bool isGenerating = app.queuedOrGeneratingChunkSet.find(coord) != app.queuedOrGeneratingChunkSet.end();
                         const bool isMeshing = app.queuedOrMeshingChunkSet.find(coord) != app.queuedOrMeshingChunkSet.end();
@@ -246,48 +308,35 @@ void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imag
         throw std::runtime_error("Failed to begin recording command buffer");
     }
 
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass        = renderPass;
-    renderPassInfo.framebuffer       = swapchainFramebuffers[imageIndex];
-    renderPassInfo.renderArea.offset = {0, 0};
-    renderPassInfo.renderArea.extent = swapchainExtent;
-
-    std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color        = {{0.0f, 0.0f, 0.0f, 1.0f}};
-    clearValues[1].depthStencil = {1.0f, 0};
-
-    renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    renderPassInfo.pClearValues    = clearValues.data();
-
-    vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-    if (!descriptorSets.empty()) {
-        const uint32_t activeFrame = currentFrame % static_cast<uint32_t>(descriptorSets.size());
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[activeFrame], 0, nullptr);
-    }
-
     const ChunkCoord renderCenter = chunkForPosition(camera.position());
     const int drawKeepRadius = renderDistanceChunks.load(std::memory_order_relaxed) + kKeepRadiusExtra + 2;
+    const int shadowKeepRadius = drawKeepRadius + 2;
     const glm::vec3 cameraPos = camera.position();
     const glm::mat4 viewProjection = camera.projectionMatrix() * camera.viewMatrix();
     const std::array<glm::vec4, 6> frustumPlanes = extractFrustumPlanes(viewProjection);
     const float drawDistanceExtent = static_cast<float>(drawKeepRadius * kChunkSize);
     const float maxVisibleDistance = drawDistanceExtent * std::sqrt(2.0f) + kVisibilityDistancePadding;
 
+    std::vector<DrawChunkEntry> shadowDrawEntries;
+    shadowDrawEntries.reserve(activeChunkMeshes.size());
     std::vector<DrawChunkEntry> drawEntries;
     drawEntries.reserve(activeChunkMeshes.size());
     {
         std::lock_guard<std::mutex> lock(chunkQueueMutex);
         drawEntries.reserve(activeChunkMeshes.size());
-        for (const auto& [coord, mesh] : activeChunkMeshes) {
+        for (const auto& [regionCoord, mesh] : activeChunkMeshes) {
             if (mesh.indexCount == 0 || mesh.vertexBuffer == VK_NULL_HANDLE || mesh.indexBuffer == VK_NULL_HANDLE) {
                 continue;
             }
 
-            const int dx = std::abs(coord.x - renderCenter.x);
-            const int dz = std::abs(coord.z - renderCenter.z);
+            const int dx = std::abs(regionCoord.chunk.x - renderCenter.x);
+            const int dz = std::abs(regionCoord.chunk.z - renderCenter.z);
+            if ((std::max)(dx, dz) > shadowKeepRadius) {
+                continue;
+            }
+
+            shadowDrawEntries.push_back(DrawChunkEntry{mesh.vertexBuffer, mesh.indexBuffer, mesh.vertexCount, mesh.indexCount});
+
             if ((std::max)(dx, dz) > drawKeepRadius) {
                 continue;
             }
@@ -298,6 +347,61 @@ void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imag
 
             drawEntries.push_back(DrawChunkEntry{mesh.vertexBuffer, mesh.indexBuffer, mesh.vertexCount, mesh.indexCount});
         }
+    }
+
+    const bool hasDescriptorSets = !descriptorSets.empty();
+    const uint32_t activeFrame = hasDescriptorSets
+        ? currentFrame % static_cast<uint32_t>(descriptorSets.size())
+        : 0;
+
+    VkRenderPassBeginInfo shadowPassInfo{};
+    shadowPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    shadowPassInfo.renderPass = shadowRenderPass;
+    shadowPassInfo.framebuffer = shadowFramebuffer;
+    shadowPassInfo.renderArea.offset = {0, 0};
+    shadowPassInfo.renderArea.extent = shadowMapExtent;
+
+    VkClearValue shadowClearValue{};
+    shadowClearValue.depthStencil = {1.0f, 0};
+    shadowPassInfo.clearValueCount = 1;
+    shadowPassInfo.pClearValues = &shadowClearValue;
+
+    vkCmdBeginRenderPass(commandBuffer, &shadowPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
+
+    if (hasDescriptorSets) {
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[activeFrame], 0, nullptr);
+    }
+
+    for (const DrawChunkEntry& drawEntry : shadowDrawEntries) {
+        VkBuffer vertexBuffers[] = {drawEntry.vertexBuffer};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, drawEntry.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(commandBuffer, drawEntry.indexCount, 1, 0, 0, 0);
+    }
+
+    vkCmdEndRenderPass(commandBuffer);
+
+    VkRenderPassBeginInfo renderPassInfo{};
+    renderPassInfo.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassInfo.renderPass        = renderPass;
+    renderPassInfo.framebuffer       = swapchainFramebuffers[imageIndex];
+    renderPassInfo.renderArea.offset = {0, 0};
+    renderPassInfo.renderArea.extent = swapchainExtent;
+
+    std::array<VkClearValue, 2> clearValues{};
+    clearValues[0].color        = {{0.53f, 0.66f, 0.92f, 1.0f}};
+    clearValues[1].depthStencil = {1.0f, 0};
+
+    renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+    renderPassInfo.pClearValues    = clearValues.data();
+
+    vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+    if (hasDescriptorSets) {
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[activeFrame], 0, nullptr);
     }
 
     if constexpr (kLogRenderedChunkStats) {
@@ -442,6 +546,9 @@ void VulkanApp::requestTerrainWindow(const ChunkCoord& centerChunk) {
             }
         }
 
+        reprioritizeChunkQueue(generationJobQueue, streamingCenter);
+        reprioritizeChunkQueue(meshJobQueue, streamingCenter);
+
         size_t remainingGenerationSlots = kMaxGenerationJobs > generationJobQueue.size() ? (kMaxGenerationJobs - generationJobQueue.size()) : 0;
         size_t remainingMeshSlots = kMaxMeshJobs > meshJobQueue.size() ? (kMaxMeshJobs - meshJobQueue.size()) : 0;
 
@@ -452,7 +559,7 @@ void VulkanApp::requestTerrainWindow(const ChunkCoord& centerChunk) {
         }
         for (const ChunkCoord& coord : targetCoords) {
 
-            if (activeChunkMeshes.find(coord) != activeChunkMeshes.end() ||
+            if (chunkHasActiveMesh(coord) ||
                 completedEmptyChunkSet.find(coord) != completedEmptyChunkSet.end()) {
                 continue;
             }
@@ -488,7 +595,7 @@ void VulkanApp::requestTerrainWindow(const ChunkCoord& centerChunk) {
                 if (remainingMeshSlots == 0) {
                     return false;
                 }
-                meshJobQueue.push_back(coord);
+                insertChunkByPriority(meshJobQueue, coord, streamingCenter);
                 queuedOrMeshingChunkSet.insert(coord);
                 --remainingMeshSlots;
                 return true;
@@ -497,7 +604,7 @@ void VulkanApp::requestTerrainWindow(const ChunkCoord& centerChunk) {
             if (remainingGenerationSlots == 0) {
                 return false;
             }
-            generationJobQueue.push_back(coord);
+            insertChunkByPriority(generationJobQueue, coord, streamingCenter);
             queuedOrGeneratingChunkSet.insert(coord);
             --remainingGenerationSlots;
             return true;
@@ -526,13 +633,23 @@ void VulkanApp::requestTerrainWindow(const ChunkCoord& centerChunk) {
     removedActiveCoords.reserve(256);
     {
         std::lock_guard<std::mutex> activeLock(chunkQueueMutex);
-        for (auto it = activeChunkMeshes.begin(); it != activeChunkMeshes.end();) {
-            if (keepSet.find(it->first) == keepSet.end()) {
-                removedActiveCoords.push_back(it->first);
-                enqueueChunkMeshForDestruction(std::move(it->second));
-                it = activeChunkMeshes.erase(it);
-            } else {
-                ++it;
+        for (const auto& [coord, count] : activeChunkMeshCounts) {
+            if (keepSet.find(coord) == keepSet.end()) {
+                removedActiveCoords.push_back(coord);
+            }
+        }
+
+        if (!removedActiveCoords.empty()) {
+            for (auto it = activeChunkMeshes.begin(); it != activeChunkMeshes.end();) {
+                if (keepSet.find(it->first.chunk) == keepSet.end()) {
+                    enqueueChunkMeshForDestruction(std::move(it->second));
+                    it = activeChunkMeshes.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            for (const ChunkCoord& removedCoord : removedActiveCoords) {
+                activeChunkMeshCounts.erase(removedCoord);
             }
         }
         for (auto it = completedEmptyChunkSet.begin(); it != completedEmptyChunkSet.end();) {
@@ -576,7 +693,7 @@ void VulkanApp::requestTerrainWindow(const ChunkCoord& centerChunk) {
                     break;
                 }
 
-                meshJobQueue.push_back(neighbor);
+                insertChunkByPriority(meshJobQueue, neighbor, streamingCenter);
                 queuedOrMeshingChunkSet.insert(neighbor);
             }
         }
@@ -632,6 +749,7 @@ void VulkanApp::runChunkGenerationWorker() {
 
         {
             std::lock_guard<std::mutex> lock(chunkQueueMutex);
+            const ChunkCoord streamingCenter = requestedTerrainCenterChunk;
             queuedOrGeneratingChunkSet.erase(coord);
 
             const auto enqueueMeshJob = [&](const ChunkCoord& targetCoord, bool forceRemesh) {
@@ -642,7 +760,7 @@ void VulkanApp::runChunkGenerationWorker() {
                     return;
                 }
                 if (!forceRemesh) {
-                    if (activeChunkMeshes.find(targetCoord) != activeChunkMeshes.end()) {
+                    if (chunkHasActiveMesh(targetCoord)) {
                         return;
                     }
                     if (completedEmptyChunkSet.find(targetCoord) != completedEmptyChunkSet.end()) {
@@ -653,7 +771,7 @@ void VulkanApp::runChunkGenerationWorker() {
                     return;
                 }
 
-                meshJobQueue.push_back(targetCoord);
+                insertChunkByPriority(meshJobQueue, targetCoord, streamingCenter);
                 queuedOrMeshingChunkSet.insert(targetCoord);
             };
 
@@ -675,7 +793,7 @@ void VulkanApp::runChunkGenerationWorker() {
                 };
 
                 const bool neighborLoaded =
-                    activeChunkMeshes.find(neighborCoord) != activeChunkMeshes.end()
+                    chunkHasActiveMesh(neighborCoord)
                     || completedEmptyChunkSet.find(neighborCoord) != completedEmptyChunkSet.end();
                 if (!neighborLoaded) {
                     continue;
@@ -719,7 +837,7 @@ void VulkanApp::runChunkMeshWorker() {
             continue;
         }
 
-        PendingChunkMesh meshData = buildChunkMeshData(coord);
+        PendingChunkMeshBatch meshData = buildChunkMeshData(coord);
 
         {
             std::lock_guard<std::mutex> lock(chunkQueueMutex);
@@ -750,7 +868,7 @@ void VulkanApp::runChunkMeshWorker() {
  * @return No return value.
  */
 void VulkanApp::uploadCompletedChunkMeshes() {
-    std::vector<std::pair<ChunkCoord, GpuChunkMesh>> readyGpuMeshes;
+    std::vector<std::pair<PendingChunkMesh::MeshRegionCoord, GpuChunkMesh>> readyGpuMeshes;
     std::vector<UploadStagingBuffers> uploadStaging;
     readyGpuMeshes.reserve(kChunkUploadsPerFrame);
     uploadStaging.reserve(kChunkUploadsPerFrame);
@@ -781,7 +899,7 @@ void VulkanApp::uploadCompletedChunkMeshes() {
 
     int uploadedCount = 0;
     while (uploadedCount < uploadBudget) {
-        PendingChunkMesh pending{};
+        PendingChunkMeshBatch pending{};
         {
             std::lock_guard<std::mutex> lock(completedChunkMutex);
             if (completedChunkMeshes.empty()) {
@@ -805,62 +923,68 @@ void VulkanApp::uploadCompletedChunkMeshes() {
         }
 
         if (pending.hasGeometry) {
-            GpuChunkMesh gpuMesh{};
-            gpuMesh.vertexCount = static_cast<uint32_t>(pending.vertices.size());
-            gpuMesh.indexCount = static_cast<uint32_t>(pending.indices.size());
-            gpuMesh.minCorner = pending.minCorner;
-            gpuMesh.maxCorner = pending.maxCorner;
-
-            UploadStagingBuffers buffers{};
-
-            VkDeviceSize vertexBufferSize = sizeof(Vertex) * pending.vertices.size();
-            createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, buffers.stagingVertex, buffers.stagingVertexMemory);
-            void* vertexData = nullptr;
-            vkMapMemory(device, buffers.stagingVertexMemory, 0, vertexBufferSize, 0, &vertexData);
-            std::memcpy(vertexData, pending.vertices.data(), static_cast<size_t>(vertexBufferSize));
-            vkUnmapMemory(device, buffers.stagingVertexMemory);
-
-            createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, gpuMesh.vertexBuffer, gpuMesh.vertexBufferMemory);
-
-            VkDeviceSize indexBufferSize = sizeof(uint32_t) * pending.indices.size();
-            createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, buffers.stagingIndex, buffers.stagingIndexMemory);
-            void* indexData = nullptr;
-            vkMapMemory(device, buffers.stagingIndexMemory, 0, indexBufferSize, 0, &indexData);
-            std::memcpy(indexData, pending.indices.data(), static_cast<size_t>(indexBufferSize));
-            vkUnmapMemory(device, buffers.stagingIndexMemory);
-
-            createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, gpuMesh.indexBuffer, gpuMesh.indexBufferMemory);
-
-            if (!uploadCommandStarted) {
-                VkCommandBufferAllocateInfo allocInfo{};
-                allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-                allocInfo.commandPool = commandPool;
-                allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-                allocInfo.commandBufferCount = 1;
-                if (vkAllocateCommandBuffers(device, &allocInfo, &uploadCommandBuffer) != VK_SUCCESS) {
-                    throw std::runtime_error("Failed to allocate batched upload command buffer");
+            for (const PendingChunkMesh& regionMesh : pending.regionMeshes) {
+                if (!regionMesh.hasGeometry) {
+                    continue;
                 }
 
-                VkCommandBufferBeginInfo beginInfo{};
-                beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-                beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-                if (vkBeginCommandBuffer(uploadCommandBuffer, &beginInfo) != VK_SUCCESS) {
-                    vkFreeCommandBuffers(device, commandPool, 1, &uploadCommandBuffer);
-                    throw std::runtime_error("Failed to begin batched upload command buffer");
+                GpuChunkMesh gpuMesh{};
+                gpuMesh.vertexCount = static_cast<uint32_t>(regionMesh.vertices.size());
+                gpuMesh.indexCount = static_cast<uint32_t>(regionMesh.indices.size());
+                gpuMesh.minCorner = regionMesh.minCorner;
+                gpuMesh.maxCorner = regionMesh.maxCorner;
+
+                UploadStagingBuffers buffers{};
+
+                VkDeviceSize vertexBufferSize = sizeof(Vertex) * regionMesh.vertices.size();
+                createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, buffers.stagingVertex, buffers.stagingVertexMemory);
+                void* vertexData = nullptr;
+                vkMapMemory(device, buffers.stagingVertexMemory, 0, vertexBufferSize, 0, &vertexData);
+                std::memcpy(vertexData, regionMesh.vertices.data(), static_cast<size_t>(vertexBufferSize));
+                vkUnmapMemory(device, buffers.stagingVertexMemory);
+
+                createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, gpuMesh.vertexBuffer, gpuMesh.vertexBufferMemory);
+
+                VkDeviceSize indexBufferSize = sizeof(uint32_t) * regionMesh.indices.size();
+                createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, buffers.stagingIndex, buffers.stagingIndexMemory);
+                void* indexData = nullptr;
+                vkMapMemory(device, buffers.stagingIndexMemory, 0, indexBufferSize, 0, &indexData);
+                std::memcpy(indexData, regionMesh.indices.data(), static_cast<size_t>(indexBufferSize));
+                vkUnmapMemory(device, buffers.stagingIndexMemory);
+
+                createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, gpuMesh.indexBuffer, gpuMesh.indexBufferMemory);
+
+                if (!uploadCommandStarted) {
+                    VkCommandBufferAllocateInfo allocInfo{};
+                    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                    allocInfo.commandPool = commandPool;
+                    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                    allocInfo.commandBufferCount = 1;
+                    if (vkAllocateCommandBuffers(device, &allocInfo, &uploadCommandBuffer) != VK_SUCCESS) {
+                        throw std::runtime_error("Failed to allocate batched upload command buffer");
+                    }
+
+                    VkCommandBufferBeginInfo beginInfo{};
+                    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+                    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+                    if (vkBeginCommandBuffer(uploadCommandBuffer, &beginInfo) != VK_SUCCESS) {
+                        vkFreeCommandBuffers(device, commandPool, 1, &uploadCommandBuffer);
+                        throw std::runtime_error("Failed to begin batched upload command buffer");
+                    }
+                    uploadCommandStarted = true;
                 }
-                uploadCommandStarted = true;
+
+                VkBufferCopy vertexRegion{};
+                vertexRegion.size = vertexBufferSize;
+                vkCmdCopyBuffer(uploadCommandBuffer, buffers.stagingVertex, gpuMesh.vertexBuffer, 1, &vertexRegion);
+
+                VkBufferCopy indexRegion{};
+                indexRegion.size = indexBufferSize;
+                vkCmdCopyBuffer(uploadCommandBuffer, buffers.stagingIndex, gpuMesh.indexBuffer, 1, &indexRegion);
+
+                uploadStaging.push_back(buffers);
+                readyGpuMeshes.emplace_back(regionMesh.coord, std::move(gpuMesh));
             }
-
-            VkBufferCopy vertexRegion{};
-            vertexRegion.size = vertexBufferSize;
-            vkCmdCopyBuffer(uploadCommandBuffer, buffers.stagingVertex, gpuMesh.vertexBuffer, 1, &vertexRegion);
-
-            VkBufferCopy indexRegion{};
-            indexRegion.size = indexBufferSize;
-            vkCmdCopyBuffer(uploadCommandBuffer, buffers.stagingIndex, gpuMesh.indexBuffer, 1, &indexRegion);
-
-            uploadStaging.push_back(buffers);
-            readyGpuMeshes.emplace_back(pending.coord, std::move(gpuMesh));
         } else {
             bool chunkExists = false;
             {
