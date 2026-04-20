@@ -617,7 +617,7 @@ private:
 
     std::vector<Vertex> voxelVertices;
     std::vector<uint32_t> voxelIndices;
-    static constexpr int kMeshRegionSize = 8;
+    static constexpr int kMeshRegionSize = 16;
     static constexpr int kChunkUploadsPerFrame = 12;
     static constexpr int kPrefetchRadiusExtra = 2;
     static constexpr int kKeepRadiusExtra = 3;

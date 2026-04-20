@@ -16,7 +16,7 @@ namespace {
 constexpr int kChunkSize = Chunk::SIZE;
 constexpr bool kLogRenderedChunkStats = false;
 constexpr float kVisibilityDistancePadding = static_cast<float>(kChunkSize) * 2.0f;
-constexpr double kFpsReportIntervalSeconds = 1.0;
+constexpr double kFpsReportIntervalSeconds = 0.25;
 double gSmoothedFrameTimeMs = 16.6;
 double gFpsReportElapsedSeconds = 0.0;
 uint32_t gFpsReportFrameCount = 0;
