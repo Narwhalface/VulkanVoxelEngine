@@ -1,117 +1,128 @@
 # Vulkan Voxel Engine
 
 ## Overview
-A 3D voxel rendering engine built with Vulkan, GLFW, and GLM. This project demonstrates real-time voxel terrain generation and rendering with procedural heightmap-based world generation using Perlin noise.
+This project is a Windows Vulkan voxel terrain prototype built with GLFW and GLM. The current application opens an 800x600 Vulkan window, streams voxel terrain around the camera, shades it with a directional light, and renders a shadow map for terrain self-shadowing.
 
-## Features
-- **Vulkan Graphics Pipeline**: Modern low-level graphics API implementation with depth buffering and proper synchronization
-- **Voxel World System**: Chunk-based world management (16×16×16 voxel chunks) with efficient storage
-- **Procedural Terrain Generation**: Multi-octave Perlin noise terrain generation with configurable parameters
-- **Camera System**: First-person perspective camera with full 3D movement capabilities
-- **Input Controller**: Keyboard and mouse input handling for camera navigation
-- **GLSL Shader Pipeline**: Vertex and fragment shaders compiled to SPIR-V at build time
+The world is generated procedurally at runtime and can be tuned from [scripts/terrain.lua](scripts/terrain.lua).
 
-## Project Structure
-```
+## What Works Today
+- Vulkan swapchain, depth buffering, and per-frame synchronization
+- Procedural voxel terrain generation with solid terrain, grass surface voxels, and water fill
+- Asynchronous chunk generation, meshing, upload, and streaming around the camera
+- First-person camera controls with mouse look, vertical movement, and sprint
+- Frustum-culling of visible chunk meshes
+- Directional lighting with a 4096x4096 shadow map
+- GLSL shaders compiled to SPIR-V during the CMake build
+- Lua-driven terrain startup settings on Windows through a dynamically loaded Lua runtime DLL
+
+## Controls
+- `W`, `A`, `S`, `D`: move
+- Mouse: look around
+- `Space`: move up
+- `Left Ctrl` or `C`: move down
+- `Left Shift` or `Right Shift`: sprint
+- `Esc`: close the application
+
+The cursor is captured when the window is active.
+
+## Terrain Script
+On startup the app reads [scripts/terrain.lua](scripts/terrain.lua) if it can find it relative to the current working directory or the executable directory.
+
+Supported globals:
+- `Render_distance`: chunk draw distance, clamped to `2..32`
+- `Noise_intensity`: terrain elevation amplitude, clamped to `1.0..128.0`
+- `Terrain_seed`: fixed world seed
+- `Randomize_seed`: generate a new random seed on each launch
+
+If no supported Lua runtime DLL is present next to the executable (`lua54.dll`, `lua53.dll`, or `lua52.dll`), the app logs a warning and continues with built-in defaults.
+
+## Project Layout
+```text
 VulkanVoxelEngine/
 ├── src/
-│   ├── main.cpp              # Entry point and window initialization
-│   ├── VulkanApp.cpp/.hpp    # Core Vulkan rendering engine
-│   ├── Camera.cpp/.hpp       # Camera system
-│   ├── InputController.cpp/.hpp  # Input handling
-│   ├── World.cpp/.hpp        # Voxel world and terrain generation
+│   ├── main.cpp
+│   ├── VulkanApp.cpp/.hpp
+│   ├── RenderLoop.cpp/.hpp
+│   ├── Camera.cpp/.hpp
+│   ├── InputController.cpp/.hpp
+│   ├── World.cpp/.hpp
+│   ├── LuaTerrainScriptBridge.hpp
 │   └── shaders/
-│       ├── voxel.vert        # Vertex shader (GLSL)
-│       └── voxel.frag        # Fragment shader (GLSL)
+│       ├── voxel.vert
+│       ├── voxel.frag
+│       └── shadow.vert
+├── scripts/
+│   └── terrain.lua
+├── shaders/
+│   └── *.spv                # Generated at build time
 ├── external/
-│   ├── glfw/                 # GLFW window library
-│   └── glm/                  # GLM math library
-├── build/                    # Generated build files
-└── CMakeLists.txt            # CMake build configuration
+│   ├── GLFW/
+│   └── glm/
+├── CMakeLists.txt
+└── CMakePresets.json
 ```
 
 ## Prerequisites
-- **OS**: Windows 10/11 (64-bit)
-- **Compiler**: Visual Studio 2022 or MSVC toolchain
-- **Build System**: CMake 3.10 or higher
-- **Graphics API**: Vulkan SDK (with `VULKAN_SDK` environment variable set)
-- **Hardware**: Vulkan-capable GPU with up-to-date drivers
+- Windows 10 or 11
+- Visual Studio 2022 with MSVC
+- CMake 3.10+
+- Vulkan SDK with `glslc` available
+- Vulkan-capable GPU and current drivers
 
-## Building the Project
+## Build
+This repository already includes CMake presets for Visual Studio 2022.
 
-1. **Clone the repository**:
-```powershell
-git clone <your-repo-url> VulkanVoxelEngine
-cd VulkanVoxelEngine
-```
-
-2. **Configure with CMake**:
-```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-```
-
-3. **Build the project**:
-```powershell
-cmake --build build --config Debug
-```
-
-The build process will:
-- Compile C++ source files
-- Compile GLSL shaders to SPIR-V using `glslc` from the Vulkan SDK
-- Copy shader binaries to `build/bin/Debug/shaders/`
-
-## Running the Application
+Release build:
 
 ```powershell
-.\build\bin\Debug\VulkanProject.exe
+cmake --preset vs2022-release
+cmake --build --preset build-release
 ```
 
-The application will open a window titled "32002614 Voxel Engine Prototype" (800×600) and render the procedurally generated voxel terrain.
+Debug build:
+
+```powershell
+cmake --preset vs2022-debug
+cmake --build --preset build-debug
+```
+
+Build output:
+- Executable: `build/bin/<Config>/VulkanProject.exe`
+- Generated shaders: `shaders/*.spv`
+
+## Run
+From the repository root:
+
+```powershell
+.\build\bin\Release\VulkanProject.exe
+```
+
+You can also run the Debug build if you built that configuration instead.
+
+At startup the app:
+- loads terrain settings from `scripts/terrain.lua` when available
+- creates worker threads for chunk generation and meshing
+- positions the camera above generated terrain once nearby chunks are ready
+
+## Rendering Notes
+- Terrain is built from 16x16x16 voxel chunks
+- The default runtime render distance is 16 chunks unless overridden by Lua
+- The terrain generator uses layered value noise, not a full Perlin-noise implementation
+- Water is generated up to a configurable water level
+- Shadowing is sampled in the voxel fragment shader from a depth texture produced in a separate shadow pass
 
 ## Troubleshooting
+### Vulkan SDK not found
+Install the LunarG Vulkan SDK and make sure CMake can find Vulkan headers, libraries, and `glslc`.
 
-### Vulkan SDK Not Found
-- **Issue**: CMake cannot locate the Vulkan SDK
-- **Solution**: Install the [LunarG Vulkan SDK](https://vulkan.lunarg.com/) and ensure the `VULKAN_SDK` environment variable is set
+### Shaders fail to load at runtime
+Build the project first so `shaders/voxel.vert.spv`, `shaders/voxel.frag.spv`, and `shaders/shadow.vert.spv` exist.
 
-### Shader Compilation Errors
-- **Issue**: Shaders fail to compile during build
-- **Solution**: Verify `glslc` is available in `%VULKAN_SDK%\Bin\` and accessible in your PATH
+### Lua settings are ignored
+Place `lua54.dll`, `lua53.dll`, or `lua52.dll` next to the executable. Without a Lua DLL the app falls back to defaults and prints a warning.
 
-### GLFW Linking Errors
-- **Issue**: Linker errors related to GLFW
-- **Solution**: Ensure GLFW libraries in `external/glfw/lib/` match your toolchain (Visual Studio 2022, x64)
+### Application starts but terrain seems missing
+The app streams terrain asynchronously. Initial chunk generation and upload can take a moment, after which the camera is placed above the loaded terrain.
 
-### Runtime Validation Errors
-- **Issue**: Vulkan validation layer warnings/errors
-- **Solution**: Enable validation layers by setting `ENABLE_VALIDATION` CMake option to `ON` for debugging:
-  ```powershell
-  cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DENABLE_VALIDATION=ON
-  ```
-
-### Application Crashes on Startup
-- **Check**: GPU driver is up to date and supports Vulkan
-- **Check**: Shader files exist in `build/bin/Debug/shaders/` (voxel.vert.spv, voxel.frag.spv)
-
-## Technical Details
-
-### Rendering Pipeline
-- **Vertex Input**: Position (vec3) and Color (vec3) attributes
-- **Uniform Buffers**: Model-View-Projection matrices updated per frame
-- **Depth Testing**: Enabled with 32-bit depth buffer
-- **Render Pass**: Single subpass with color and depth attachments
-
-### World Generation
-- **Terrain Algorithm**: Multi-octave Perlin noise heightmap
-- **Default Settings**: Base height 32, amplitude 24, 4 octaves, water level 16
-- **Chunk System**: Dynamically managed chunks with hash-based lookup
-
-### Frame Timing
-- Target frame rate: 60 FPS with vsync-like behavior
-- Command buffers submitted per frame with proper synchronization (semaphores and fences)
-
-## Development Notes
-- C++17 standard required
-- GLM forced to use radians for angle calculations
-- Framebuffer resizing callback implemented for window resize support
-- Validation layers available but disabled by default for performance
+## Current Scope
+This README describes the functionality currently implemented in the codebase. It does not assume editor tooling, in-game UI, terrain editing, save/load, or gameplay systems beyond free-fly terrain exploration.

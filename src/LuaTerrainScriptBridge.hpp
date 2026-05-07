@@ -136,11 +136,19 @@ public:
         }
         luaSetTop(luaState, -2);
 
-        luaGetGlobal(luaState, "randomize_seed");
+        luaGetGlobal(luaState, "Randomize_seed");
         if (luaType(luaState, -1) == luaTBoolean) {
             scriptValues.randomizeSeed = (luaToBoolean(luaState, -1) != 0);
         }
         luaSetTop(luaState, -2);
+
+        if (!scriptValues.randomizeSeed.has_value()) {
+            luaGetGlobal(luaState, "randomize_seed");
+            if (luaType(luaState, -1) == luaTBoolean) {
+                scriptValues.randomizeSeed = (luaToBoolean(luaState, -1) != 0);
+            }
+            luaSetTop(luaState, -2);
+        }
 
         luaClose(luaState);
         FreeLibrary(luaModule);

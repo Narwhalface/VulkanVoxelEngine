@@ -16,10 +16,8 @@ namespace {
 constexpr int kChunkSize = Chunk::SIZE;
 constexpr bool kLogRenderedChunkStats = false;
 constexpr float kVisibilityDistancePadding = static_cast<float>(kChunkSize) * 2.0f;
-constexpr double kFpsReportIntervalSeconds = 0.25;
 double gSmoothedFrameTimeMs = 16.6;
-double gFpsReportElapsedSeconds = 0.0;
-uint32_t gFpsReportFrameCount = 0;
+bool gChunkRenderCountsReported = false;
 
 struct DrawChunkEntry {
     VkBuffer vertexBuffer = VK_NULL_HANDLE;
@@ -131,19 +129,6 @@ void VulkanApp::drawFrame(VulkanApp& app) {
     deltaSeconds = std::clamp(deltaSeconds, 0.0, 0.25);
     const double frameTimeMs = deltaSeconds * 1000.0;
     gSmoothedFrameTimeMs = gSmoothedFrameTimeMs * 0.9 + frameTimeMs * 0.1;
-    gFpsReportElapsedSeconds += deltaSeconds;
-    ++gFpsReportFrameCount;
-
-    if (gFpsReportElapsedSeconds >= kFpsReportIntervalSeconds) {
-        const double averageFps = gFpsReportElapsedSeconds > 0.0
-            ? static_cast<double>(gFpsReportFrameCount) / gFpsReportElapsedSeconds
-            : 0.0;
-        std::cout
-            << "FPS: " << averageFps
-            << " | Frame time: " << gSmoothedFrameTimeMs << " ms\n";
-        gFpsReportElapsedSeconds = 0.0;
-        gFpsReportFrameCount = 0;
-    }
 
     if (app.swapchainExtent.width == 0 || app.swapchainExtent.height == 0) {
         return;
@@ -230,6 +215,55 @@ void VulkanApp::drawFrame(VulkanApp& app) {
     processCompletedUploadBatches();
     processDeferredDestroyQueue();
     uploadCompletedChunkMeshes();
+
+    bool allChunksDoneRendering = false;
+    uint64_t totalVertexCount = 0;
+    uint64_t totalIndexCount = 0;
+    size_t completedChunkBacklog = 0;
+    {
+        std::lock_guard<std::mutex> completedLock(app.completedChunkMutex);
+        completedChunkBacklog = app.completedChunkMeshes.size();
+    }
+    {
+        std::lock_guard<std::mutex> lock(app.chunkQueueMutex);
+        size_t resolvedChunkCount = 0;
+        for (const ChunkCoord& coord : app.desiredChunkSet) {
+            const bool isActive = app.activeChunkMeshCounts.find(coord) != app.activeChunkMeshCounts.end();
+            const bool isEmpty = app.completedEmptyChunkSet.find(coord) != app.completedEmptyChunkSet.end();
+            if (isActive || isEmpty) {
+                ++resolvedChunkCount;
+            }
+        }
+
+        const bool hasOutstandingChunkWork = !app.generationJobQueue.empty()
+            || !app.meshJobQueue.empty()
+            || !app.queuedOrGeneratingChunkSet.empty()
+            || !app.queuedOrMeshingChunkSet.empty()
+            || completedChunkBacklog != 0
+            || !app.pendingUploadBatches.empty();
+
+        allChunksDoneRendering = !app.desiredChunkSet.empty()
+            && !hasOutstandingChunkWork
+            && resolvedChunkCount == app.desiredChunkSet.size();
+
+        if (allChunksDoneRendering) {
+            for (const auto& [regionCoord, mesh] : app.activeChunkMeshes) {
+                totalVertexCount += static_cast<uint64_t>(mesh.vertexCount);
+                totalIndexCount += static_cast<uint64_t>(mesh.indexCount);
+            }
+        }
+    }
+
+    if (allChunksDoneRendering) {
+        if (!gChunkRenderCountsReported) {
+            std::cout
+                << "Chunk rendering complete | Vertices: " << totalVertexCount
+                << " | Indices: " << totalIndexCount << "\n";
+            gChunkRenderCountsReported = true;
+        }
+    } else {
+        gChunkRenderCountsReported = false;
+    }
 
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
