@@ -5,15 +5,15 @@ This project is a Windows Vulkan voxel terrain prototype built with GLFW and GLM
 
 The world is generated procedurally at runtime and can be tuned from [scripts/terrain.lua](scripts/terrain.lua).
 
-## What Works Today
-- Vulkan swapchain, depth buffering, and per-frame synchronization
-- Procedural voxel terrain generation with solid terrain, grass surface voxels, and water fill
-- Asynchronous chunk generation, meshing, upload, and streaming around the camera
-- First-person camera controls with mouse look, vertical movement, and sprint
-- Frustum-culling of visible chunk meshes
-- Directional lighting with a 4096x4096 shadow map
-- GLSL shaders compiled to SPIR-V during the CMake build
-- Lua-driven terrain startup settings on Windows through a dynamically loaded Lua runtime DLL
+## Implemented Features
+- Stable Vulkan rendering pipeline with swapchain management, depth buffering, and per-frame synchronization
+- Procedural voxel terrain generation, including solid terrain volumes, grass surface layers, and water fill regions
+- Asynchronous chunk generation, meshing, GPU upload, and camera-centered streaming
+- First-person navigation with mouse-look, vertical traversal, and sprint movement
+- Frustum culling for visible chunk mesh selection
+- Directional lighting with a 4096x4096 shadow map for terrain self-shadowing
+- Automated GLSL-to-SPIR-V shader compilation as part of the CMake build process
+- Lua-configurable terrain startup parameters on Windows via a dynamically loaded Lua runtime DLL
 
 ## Controls
 - `W`, `A`, `S`, `D`: move
